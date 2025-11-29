@@ -1,5 +1,5 @@
 - guid: 33201d07-4d80-c271-28d5-82548dde0a67
-  title: Game Name
+  title: Valheim
   source: github
   repo: BitsNBytes25/Valheim-Installer
   installer: dist/installer.sh
@@ -13,7 +13,7 @@
     - "--dir=<path> - Use a custom installation directory instead of the default (optional)"
     - "--skip-firewall  - Do not install or configure a system firewall"
     - "--non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)"
-  image: media/some-game-image.webp
-  icon: media/some-game-icon.webp
-  thumbnail: media/some-game-thumbnail.webp
+  image: media/valheim-1920x1080.webp
+  icon: media/valheim-128x128.webp
+  thumbnail: media/valheim-640x354.webp
 

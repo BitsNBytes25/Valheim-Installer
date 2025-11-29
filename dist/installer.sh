@@ -8,10 +8,10 @@
 # @AUTHOR  Charlie Powell <cdp1337@bitsnbytes.dev>
 # @CATEGORY Game Server
 # @TRMM-TIMEOUT 600
-# @WARLOCK-TITLE Game Name
-# @WARLOCK-IMAGE media/some-game-image.webp
-# @WARLOCK-ICON media/some-game-icon.webp
-# @WARLOCK-THUMBNAIL media/some-game-thumbnail.webp
+# @WARLOCK-TITLE Valheim
+# @WARLOCK-IMAGE media/valheim-1920x1080.webp
+# @WARLOCK-ICON media/valheim-128x128.webp
+# @WARLOCK-THUMBNAIL media/valheim-640x354.webp
 #
 # Supports:
 #   Debian 12, 13

@@ -14,15 +14,10 @@ import yaml
 from scriptlets.warlock.base_app import *
 # Game services are usually either an RCON, HTTP, or base type service.
 # Include the necessary type and remove the rest.
-# from scriptlets.warlock.base_service import *
-# from scriptlets.warlock.http_service import *
-# from scriptlets.warlock.rcon_service import *
+from scriptlets.warlock.base_service import *
 from scriptlets.warlock.ini_config import *
-from scriptlets.warlock.properties_config import *
 from scriptlets.warlock.default_run import *
-
-# For games that use Steam, this provides a quick method for checking for updates
-# from scriptlets.steam.steamcmd_check_app_update import *
+from scriptlets.steam.steamcmd_check_app_update import *
 
 here = os.path.dirname(os.path.realpath(__file__))
 
@@ -38,10 +33,10 @@ class GameApp(BaseApp):
 	def __init__(self):
 		super().__init__()
 
-		self.name = 'GameName'
-		self.desc = 'Longer identifier for the game server'
-		self.steam_id = '123456789'
-		self.services = ('list-of-services',)
+		self.name = 'Valheim'
+		self.desc = 'Valheim game server'
+		self.steam_id = '896660'
+		self.services = ('valheim-server',)
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
@@ -54,8 +49,7 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		# return steamcmd_check_app_update(os.path.join(here, 'AppFiles', 'steamapps', 'appmanifest_%s.acf' % self.steam_id))
-		return False
+		return steamcmd_check_app_update(os.path.join(here, 'AppFiles', 'steamapps', 'appmanifest_%s.acf' % self.steam_id))
 
 	def get_save_files(self) -> Union[list, None]:
 		"""
@@ -77,7 +71,7 @@ class GameApp(BaseApp):
 		return os.path.join(here, 'AppFiles')
 
 
-class GameService(RCONService):
+class GameService(BaseService):
 	"""
 	Service definition and handler
 	"""
@@ -89,9 +83,9 @@ class GameService(RCONService):
 		super().__init__(service, game)
 		self.service = service
 		self.game = game
-		self.configs = {
-			'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
-		}
+		#self.configs = {
+		#	'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
+		#}
 		self.load()
 
 	def option_value_updated(self, option: str, previous_value, new_value):

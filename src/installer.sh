@@ -8,7 +8,7 @@
 # @AUTHOR  Charlie Powell <cdp1337@bitsnbytes.dev>
 # @CATEGORY Game Server
 # @TRMM-TIMEOUT 600
-# @WARLOCK-TITLE Game Name
+# @WARLOCK-TITLE Valheim
 # @WARLOCK-IMAGE media/some-game-image.webp
 # @WARLOCK-ICON media/some-game-icon.webp
 # @WARLOCK-THUMBNAIL media/some-game-thumbnail.webp
@@ -38,14 +38,14 @@
 
 # Name of the game (used to create the directory)
 INSTALLER_VERSION="v20251127~DEV"
-GAME="GameName"
-GAME_DESC="Game Dedicated Server"
-REPO="your-github/your-repo"
-WARLOCK_GUID="replace-with-guid-once-compiled"
-STEAM_ID="123456789"
+GAME="Valheim"
+GAME_DESC="Valheim Dedicated Server"
+REPO="BitsNBytes25/Valheim-Installer"
+WARLOCK_GUID="33201d07-4d80-c271-28d5-82548dde0a67"
+STEAM_ID="896660"
 GAME_USER="steam"
 GAME_DIR="/home/${GAME_USER}/${GAME}"
-GAME_SERVICE="your-game-server"
+GAME_SERVICE="valheim-server"
 
 # compile:usage
 # compile:argparse
@@ -57,6 +57,7 @@ GAME_SERVICE="your-game-server"
 # scriptlet:bz_eval_tui/prompt_yn.sh
 # scriptlet:bz_eval_tui/print_header.sh
 # scriptlet:ufw/install.sh
+# scriptlet:steam/install-steamcmd.sh
 
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 
@@ -86,7 +87,7 @@ function install_application() {
 	fi
 
 	# Preliminary requirements
-	package_install curl sudo python3-venv
+	package_install curl sudo python3-venv libpulse-dev libatomic1 libc6
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -98,18 +99,9 @@ function install_application() {
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
 
 
-	# To download a game with steamcmd, include the following header
-	#  # scriptlet:steam/install-steamcmd.sh
-	# and use 
-	#  install_steamcmd
-	#  sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
-	#
-	# For manual downloads, the following can be used
-	#  if ! download "$SRC" "$GAME_DIR/manage.py"; then
-	#      echo "Could not download management script!" >&2
-	#      exit 1
-	#  fi
-	
+	install_steamcmd
+	sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
+
 	# If you need to configure the firewall for this game service here,
 	# ensure you include the following header
 	#  # scriptlet:_common/firewall_allow.sh

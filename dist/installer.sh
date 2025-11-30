@@ -680,10 +680,11 @@ User=$GAME_USER
 Group=$GAME_USER
 WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles:\$LD_LIBRARY_PATH
+Environment=SteamAppId=$STEAM_ID
 # Only required for games which utilize Proton
 #Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID}${STEAMBETABRANCH} validate +quit
-ExecStart=$GAME_DIR/AppFiles/Game-Executable.bin
+ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
 ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
 ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
 Restart=on-failure
@@ -693,6 +694,38 @@ TimeoutStartSec=600s
 [Install]
 WantedBy=multi-user.target
 EOF
+
+	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
+		# Install system override file to be loaded by systemd
+		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
+		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
+[Unit]
+# DYNAMICALLY GENERATED FILE! Edit at your own risk
+Description=$GAME_DESC
+After=network.target
+
+[Service]
+Type=simple
+LimitNOFILE=10000
+User=$GAME_USER
+Group=$GAME_USER
+WorkingDirectory=$GAME_DIR/AppFiles
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles:\$LD_LIBRARY_PATH
+Environment=SteamAppId=$STEAM_ID
+# Only required for games which utilize Proton
+#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
+ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
+ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
+ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
+Restart=on-failure
+RestartSec=1800s
+TimeoutStartSec=600s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	fi
     systemctl daemon-reload
 
 	if [ -n "$WARLOCK_GUID" ]; then
@@ -737,74 +770,156 @@ function install_management() {
 
 	# Install configuration definitions
 	cat > "$GAME_DIR/configs.yaml" <<EOF
-game:
-  - name: APIPort
-    section: "/Script/Vein.VeinGameSession"
-    key: HTTPPort
-    default: ""
-    type: int
-    help: "The port for the server API. Leave blank to disable."
-  - name: Public
-    section: "/Script/Vein.VeinGameSession"
-    key: bPublic
-    default: "true"
-    type: bool
-    help: "Make the server publicly visible in server browsers."
-  - name: GamePort
-    section: URL
-    key: Port
-    default: "7777"
-    type: int
-    help: "The main port for game connections."
-  - name: MaxPlayers
-    section: "/Script/Engine.GameSession"
-    key: MaxPlayers
-    default: "16"
-    type: int
-    help: "Maximum number of players allowed on the server."
-  - name: ServerDescription
-    section: "/Script/Vein.VeinGameSession"
-    key: ServerDescription
-    default: "Short description of your server and your community"
-    type: text
-    help: "A brief description of your server that appears in server browsers."
-  - name: ServerName
-    section: "/Script/Vein.VeinGameSession"
-    key: ServerName
-    default: "My Vein Server"
+cli:
+  - name: Server Name
+    key: name
+    section: flag
+    default: "My server"
     type: str
     help: "The name of your server as it appears in server browsers."
-  - name: ServerPassword
-    section: "/Script/Vein.VeinGameSession"
-    key: Password
-    default: ""
-    type: str
-    help: "Password required to join the server. Leave blank for no password."
-  - name: SteamQueryPort
-    section: OnlineSubsystemSteam
-    key: GameServerQueryPort
-    default: "27015"
+  - name: Game Port
+    key: port
+    section: flag
+    default: 2456
     type: int
-    help: "The Steam query port for server listing and queries."
-  - name: VACEnabled
-    section: OnlineSubsystemSteam
-    key: bVACEnabled
-    default: "false"
+    help: "The port number your server will use for game connections."
+  - name: World Name
+    key: world
+    section: flag
+    default: "Dedicated"
+    type: str
+    help: "The name of the world your server will load or create."
+  - name: Join Password
+    key: password
+    section: flag
+    default: "secret"
+    type: str
+    help: "The password required for players to join your server."
+  - name: Save Directory
+    key: savedir
+    section: flag
+    type: str
+    help: "Override the default save path"
+  - name: Public Server
+    key: public
+    type: list
+    default: 1
+    options:
+      - 0
+      - 1
+    help: "Set to 1 to make this a public server listed on the server browser, or 0 to make it private."
+  - name: Log File
+    key: logFile
+    section: flag
+    type: str
+    help: "Path to a file where server logs will be written."
+  - name: Backups
+    key: backups
+    section: flag
+    type: int
+    default: 4
+    help: "Number of backup save files to keep."
+  - name: Backup Short Interval
+    key: backupshort
+    section: flag
+    type: int
+    default: 7200
+    help: "Interval in seconds for short interval backups."
+  - name: Backup Long Interval
+    key: backuplong
+    section: flag
+    type: int
+    default: 43200
+    help: "Interval in seconds for long interval backups."
+  - name: Crossplay Enabled
+    key: crossplay
+    section: flag
     type: bool
-    help: "Enable Valve Anti-Cheat (VAC) on the server."
-engine:
-  - name: AISpawner
-    section: ConsoleVariables
-    key: vein.AISpawner.Enabled
-    default: "true"
+    default: true
+    help: "Enable crossplay support for different platforms."
+  - name: Instance ID
+    key: instanceid
+    section: flag
+    type: str
+    help: "Unique identifier for this server instance (used for multi-instance setups)."
+  - name: Preset
+    key: preset
+    section: flag
+    type: str
+    options:
+      - Normal
+      - Casual
+      - Easy
+      - Hard
+      - Hardcore
+      - Immersive
+      - Hammer
+    help: "Specify a preset configuration for the server."
+  - name: Modifier (Combat)
+    key: modifier combat
+    section: flag
+    type: str
+    options:
+      - veryeasy
+      - easy
+      - hard
+      - veryhard
+    help: "Set the combat difficulty modifier."
+  - name: Modifier (Death Penalty)
+    key: modifier deathpenalty
+    section: flag
+    type: str
+    options:
+      - casual
+      - veryeasy
+      - easy
+      - hard
+      - hardcore
+    help: "Set the death penalty modifier."
+  - name: Modifier (Resources)
+    key: modifier resources
+    section: flag
+    type: str
+    options:
+      - muchless
+      - less
+      - more
+      - muchmore
+      - most
+    help: "Set the resource availability modifier."
+  - name: Modifier (Portals)
+    key: modifier portals
+    section: flag
+    type: str
+    options:
+      - casual
+      - hard
+      - veryhard
+    help: "Portals modifier in the game."
+  - name: Modifier - No Build Cost
+    key: setkey nobuildcost
+    section: flag
     type: bool
-    help: "Enable or disable AI spawners on the server."
-  - name: PVPEnabled
-    section: ConsoleVariables
-    key: vein.PvP
-    default: "true"
+    default: false
+    help: "If true, building structures will have no resource cost."
+  - name: Modifier - Player Events
+    key: setkey playerevents
+    section: flag
     type: bool
-    help: "Enable or disable PvP mode on the server."
+    default: false
+    help: "If true, player events are enabled."
+  - name: Modifier - Passive Mobs
+    key: setkey passivemobs
+    section: flag
+    type: bool
+    default: false
+    help: "If true, passive mobs are enabled."
+  - name: Modifier - No Map Fog
+    key: setkey nomap
+    section: flag
+    type: bool
+    default: false
+    help: "If true, no map will be available."
 manager:
   - name: Shutdown Warning 5 Minutes
     section: Messages

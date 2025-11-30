@@ -112,6 +112,14 @@ function install_application() {
     cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
 # script:systemd-template.service
 EOF
+
+	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
+		# Install system override file to be loaded by systemd
+		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
+		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
+# script:systemd-template.service
+EOF
+	fi
     systemctl daemon-reload
 
 	if [ -n "$WARLOCK_GUID" ]; then

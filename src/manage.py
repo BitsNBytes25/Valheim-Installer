@@ -16,6 +16,7 @@ from scriptlets.warlock.base_app import *
 # Include the necessary type and remove the rest.
 from scriptlets.warlock.base_service import *
 from scriptlets.warlock.ini_config import *
+from scriptlets.warlock.cli_config import *
 from scriptlets.warlock.default_run import *
 from scriptlets.steam.steamcmd_check_app_update import *
 
@@ -83,9 +84,10 @@ class GameService(BaseService):
 		super().__init__(service, game)
 		self.service = service
 		self.game = game
-		#self.configs = {
-		#	'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
-		#}
+		self.configs = {
+			'cli': CLIConfig('cli', '/etc/systemd/system/%s.service.d/override.conf' % service)
+		}
+		self.configs['cli'].format = 'ExecStart=%s/valheim_server.x86_64 %OPTIONS%' % os.path.join(here, 'AppFiles')
 		self.load()
 
 	def option_value_updated(self, option: str, previous_value, new_value):

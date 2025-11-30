@@ -1,0 +1,5 @@
+[Service]
+# Edit this line to adjust start parameters of the server
+# After modifying, please remember to run `sudo systemctl daemon-reload` to apply changes
+# compile:noescape
+ExecStart=$GAME_DIR/AppFiles/valheim_server.x86_64 -name "My server" -port 2456 -world "Dedicated" -password "secret" -crossplay

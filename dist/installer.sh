@@ -38,7 +38,7 @@
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20251127~DEV"
+INSTALLER_VERSION="v20251204"
 GAME="Valheim"
 GAME_DESC="Valheim Dedicated Server"
 REPO="BitsNBytes25/Valheim-Installer"
@@ -647,156 +647,6 @@ function install_steamcmd() {
 		exit 1
 	fi
 }
-
-print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
-
-############################################
-## Installer Actions
-############################################
-
-##
-# Install the VEIN game server using Steam
-#
-# Expects the following variables:
-#   GAME_USER    - User account to install the game under
-#   GAME_DIR     - Directory to install the game into
-#   STEAM_ID     - Steam App ID of the game
-#   GAME_DESC    - Description of the game (for logging purposes)
-#   GAME_SERVICE - Service name to install with Systemd
-#   SAVE_DIR     - Directory to store game save files
-#
-function install_application() {
-	print_header "Performing install_application"
-
-	# Create the game user account
-	# This will create the account with no password, so if you need to log in with this user,
-	# run `sudo passwd $GAME_USER` to set a password.
-	if [ -z "$(getent passwd $GAME_USER)" ]; then
-		useradd -m -U $GAME_USER
-	fi
-
-	# Preliminary requirements
-	package_install curl sudo python3-venv unzip
-
-	if [ "$FIREWALL" == "1" ]; then
-		if [ "$(get_enabled_firewall)" == "none" ]; then
-			# No firewall installed, go ahead and install UFW
-			install_ufw
-		fi
-	fi
-
-	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
-
-
-	install_steamcmd
-	sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
-
-	if [ "$MOD_OR_VANILLA" == "modded" ]; then
-		if ! install_bepinex; then
-			echo "BepInEx installation failed, reverting to vanilla!" >&2
-			MOD_OR_VANILLA="vanilla"
-		fi
-	fi
-
-	# Install system service file to be loaded by systemd
-	if [ "$MOD_OR_VANILLA" == "modded" ]; then
-		cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
-[Unit]
-# DYNAMICALLY GENERATED FILE! Edit at your own risk
-Description=$GAME_DESC
-After=network.target
-
-[Service]
-Type=simple
-LimitNOFILE=10000
-User=$GAME_USER
-Group=$GAME_USER
-WorkingDirectory=$GAME_DIR/AppFiles
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-Environment=DOORSTOP_ENABLED=1
-Environment=DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
-Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
-Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs:\$LD_LIBRARY_PATH
-Environment=SteamAppId=$STEAM_ID
-# Only required for games which utilize Proton
-#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
-ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
-ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
-Restart=on-failure
-RestartSec=1800s
-TimeoutStartSec=600s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-	else
-    	cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
-[Unit]
-# DYNAMICALLY GENERATED FILE! Edit at your own risk
-Description=$GAME_DESC
-After=network.target
-
-[Service]
-Type=simple
-LimitNOFILE=10000
-User=$GAME_USER
-Group=$GAME_USER
-WorkingDirectory=$GAME_DIR/AppFiles
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles:\$LD_LIBRARY_PATH
-Environment=SteamAppId=$STEAM_ID
-# Only required for games which utilize Proton
-#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
-ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
-ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
-Restart=on-failure
-RestartSec=1800s
-TimeoutStartSec=600s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-	fi
-
-	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
-		# Install system override file to be loaded by systemd
-		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
-		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
-[Service]
-# Edit this line to adjust start parameters of the server
-# After modifying, please remember to run \`sudo systemctl daemon-reload\` to apply changes
-ExecStart=$GAME_DIR/AppFiles/valheim_server.x86_64 -name "My server" -port 2456 -world "Dedicated" -password "secret" -crossplay
-EOF
-	fi
-    systemctl daemon-reload
-
-	if [ -n "$WARLOCK_GUID" ]; then
-		# Register Warlock
-		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
-		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
-	fi
-}
-
-function install_bepinex() {
-	print_header "Installing BepInEx for Valheim"
-
-	DEST="$(echo "$BEPINEX_URL" | sed 's:.*/\(.*\)/\([0-9\.]*\)/:\1-\2.zip:')"
-	[ -e "$GAME_DIR/Packages" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Packages"
-
-	if ! download "$BEPINEX_URL" "$GAME_DIR/Packages/$DEST" --no-overwrite; then
-		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
-		return 1
-	fi
-
-	chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Packages"
-	sudo -u $GAME_USER unzip -o "$GAME_DIR/Packages/$DEST" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
-	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
-	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
-	return 0
-}
-
 ##
 # Install the management script from the project's repo
 #
@@ -804,11 +654,13 @@ function install_bepinex() {
 #   GAME_USER    - User account to install the game under
 #   GAME_DIR     - Directory to install the game into
 #
-function install_management() {
+function install_warlock_manager() {
 	print_header "Performing install_management"
 
 	# Install management console and its dependencies
 	local SRC=""
+	local REPO="$1"
+	local INSTALLER_VERSION="$2"
 
 	if [[ "$INSTALLER_VERSION" == *"~DEV"* ]]; then
 		# Development version, pull from dev branch
@@ -1051,11 +903,170 @@ manager:
     type: str
     help: "The webhook URL for sending server status updates to a Discord channel."
 EOF
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/configs.yaml"
+
+	# Most games use .settings.ini for manager settings
+	touch "$GAME_DIR/.settings.ini"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/.settings.ini"
 
 	# If a pyenv is required:
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install pyyaml
+}
+
+
+print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
+
+############################################
+## Installer Actions
+############################################
+
+##
+# Install the VEIN game server using Steam
+#
+# Expects the following variables:
+#   GAME_USER    - User account to install the game under
+#   GAME_DIR     - Directory to install the game into
+#   STEAM_ID     - Steam App ID of the game
+#   GAME_DESC    - Description of the game (for logging purposes)
+#   GAME_SERVICE - Service name to install with Systemd
+#   SAVE_DIR     - Directory to store game save files
+#
+function install_application() {
+	print_header "Performing install_application"
+
+	# Create the game user account
+	# This will create the account with no password, so if you need to log in with this user,
+	# run `sudo passwd $GAME_USER` to set a password.
+	if [ -z "$(getent passwd $GAME_USER)" ]; then
+		useradd -m -U $GAME_USER
+	fi
+
+	# Preliminary requirements
+	package_install curl sudo python3-venv unzip
+
+	if [ "$FIREWALL" == "1" ]; then
+		if [ "$(get_enabled_firewall)" == "none" ]; then
+			# No firewall installed, go ahead and install UFW
+			install_ufw
+		fi
+	fi
+
+	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
+
+
+	install_steamcmd
+
+	install_warlock_manager "$REPO" "$INSTALLER_VERSION"
+
+	if ! $GAME_DIR/manage.py --update; then
+		echo "Could not install $GAME_DESC, exiting" >&2
+		exit 1
+	fi
+
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		if ! install_bepinex; then
+			echo "BepInEx installation failed, reverting to vanilla!" >&2
+			MOD_OR_VANILLA="vanilla"
+		fi
+	fi
+
+	# Install system service file to be loaded by systemd
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+[Unit]
+# DYNAMICALLY GENERATED FILE! Edit at your own risk
+Description=$GAME_DESC
+After=network.target
+
+[Service]
+Type=simple
+LimitNOFILE=10000
+User=$GAME_USER
+Group=$GAME_USER
+WorkingDirectory=$GAME_DIR/AppFiles
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
+Environment=DOORSTOP_ENABLED=1
+Environment=DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
+Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs
+Environment=SteamAppId=892970
+# Only required for games which utilize Proton
+#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
+ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
+ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
+Restart=on-failure
+RestartSec=1800s
+TimeoutStartSec=600s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	else
+    	cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+[Unit]
+# DYNAMICALLY GENERATED FILE! Edit at your own risk
+Description=$GAME_DESC
+After=network.target
+
+[Service]
+Type=simple
+LimitNOFILE=10000
+User=$GAME_USER
+Group=$GAME_USER
+WorkingDirectory=$GAME_DIR/AppFiles
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles
+Environment=SteamAppId=892970
+# Only required for games which utilize Proton
+#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
+ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
+ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
+Restart=on-failure
+RestartSec=1800s
+TimeoutStartSec=600s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	fi
+
+	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
+		# Install system override file to be loaded by systemd
+		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
+		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
+[Service]
+# Edit this line to adjust start parameters of the server
+# After modifying, please remember to run \`sudo systemctl daemon-reload\` to apply changes
+ExecStart=$GAME_DIR/AppFiles/valheim_server.x86_64 -name "My server" -port 2456 -world "Dedicated" -password "secret" -crossplay
+EOF
+	fi
+    systemctl daemon-reload
+
+	if [ -n "$WARLOCK_GUID" ]; then
+		# Register Warlock
+		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
+		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
+	fi
+}
+
+function install_bepinex() {
+	print_header "Installing BepInEx for Valheim"
+
+	DEST="$(echo "$BEPINEX_URL" | sed 's:.*/\(.*\)/\([0-9\.]*\)/:\1-\2.zip:')"
+	[ -e "$GAME_DIR/Packages" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Packages"
+
+	if ! download "$BEPINEX_URL" "$GAME_DIR/Packages/$DEST" --no-overwrite; then
+		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
+		return 1
+	fi
+
+	chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Packages"
+	sudo -u $GAME_USER unzip -o "$GAME_DIR/Packages/$DEST" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
+	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
+	return 0
 }
 
 function postinstall() {
@@ -1169,8 +1180,6 @@ if [ "$MODE" == "install" ]; then
 	fi
 
 	install_application
-
-	install_management
 
 	postinstall
 

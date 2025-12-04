@@ -49,6 +49,7 @@ GAME_DIR="/home/${GAME_USER}/${GAME}"
 GAME_SERVICE="valheim-server"
 BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
 
+
 # compile:usage
 # compile:argparse
 # scriptlet:_common/require_root.sh
@@ -141,13 +142,16 @@ EOF
 function install_bepinex() {
 	print_header "Installing BepInEx for Valheim"
 
-	if ! download "$BEPINEX_URL" "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"; then
+	DEST="$(echo "$BEPINEX_URL" | sed 's:.*/\(.*\)/\([0-9\.]*\)/:\1-\2.zip:')"
+	[ -e "$GAME_DIR/Packages" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Packages"
+
+	if ! download "$BEPINEX_URL" "$GAME_DIR/Packages/$DEST" --no-overwrite; then
 		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
 		return 1
 	fi
 
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"
-	sudo -u $GAME_USER unzip -o "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Packages"
+	sudo -u $GAME_USER unzip -o "$GAME_DIR/Packages/$DEST" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
 	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
 	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
 	return 0

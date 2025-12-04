@@ -10,15 +10,11 @@ from scriptlets.bz_eval_tui.table import *
 from scriptlets.bz_eval_tui.print_header import *
 from scriptlets._common.get_wan_ip import *
 # import:org_python/venv_path_include.py
-import yaml
-from scriptlets.warlock.base_app import *
-# Game services are usually either an RCON, HTTP, or base type service.
-# Include the necessary type and remove the rest.
 from scriptlets.warlock.base_service import *
+from scriptlets.warlock.steam_app import *
 from scriptlets.warlock.ini_config import *
 from scriptlets.warlock.cli_config import *
 from scriptlets.warlock.default_run import *
-from scriptlets.steam.steamcmd_check_app_update import *
 
 here = os.path.dirname(os.path.realpath(__file__))
 
@@ -26,7 +22,7 @@ here = os.path.dirname(os.path.realpath(__file__))
 IS_SUDO = os.geteuid() == 0
 
 
-class GameApp(BaseApp):
+class GameApp(SteamApp):
 	"""
 	Game application manager
 	"""
@@ -43,14 +39,6 @@ class GameApp(BaseApp):
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
 		}
 		self.load()
-
-	def check_update_available(self) -> bool:
-		"""
-		Check if a SteamCMD update is available for this game
-
-		:return:
-		"""
-		return steamcmd_check_app_update(os.path.join(here, 'AppFiles', 'steamapps', 'appmanifest_%s.acf' % self.steam_id))
 
 	def get_save_files(self) -> Union[list, None]:
 		"""
@@ -120,11 +108,7 @@ class GameService(BaseService):
 		Check if API is enabled for this service
 		:return:
 		"""
-		return (
-			self.get_option_value('Enable RCON') and
-			self.get_option_value('RCON Port') != '' and
-			self.get_option_value('RCON Password') != ''
-		)
+		return False
 
 	def get_api_port(self) -> int:
 		"""

@@ -49,6 +49,7 @@ GAME_DIR="/home/${GAME_USER}/${GAME}"
 GAME_SERVICE="valheim-server"
 BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
 
+
 function usage() {
   cat >&2 <<EOD
 Usage: $0 [options]
@@ -293,19 +294,40 @@ function package_install (){
 #
 # Returns 0 on success, 1 on failure
 #
+# Arguments:
+#   --no-overwrite       Skip download if destination file already exists
+#
 # CHANGELOG:
+#   2025.12.04 - Add --no-overwrite option to allow skipping download if the destination file exists
 #   2025.11.23 - Download to a temp location to verify download was successful
 #              - use which -s for cleaner checks
 #   2025.11.09 - Initial version
 #
 function download() {
+	# Argument parsing
 	local SOURCE="$1"
 	local DESTINATION="$2"
+	local OVERWRITE=1
 	local TMP=$(mktemp)
+	shift 2
+
+	while [ $# -ge 1 ]; do
+    		case $1 in
+    			--no-overwrite)
+    				OVERWRITE=0
+    				;;
+    		esac
+    		shift
+    	done
 
 	if [ -z "$SOURCE" ] || [ -z "$DESTINATION" ]; then
 		echo "download: Missing required parameters!" >&2
 		return 1
+	fi
+
+	if [ -f "$DESTINATION" ] && [ $OVERWRITE -eq 0 ]; then
+		echo "download: Destination file $DESTINATION already exists, skipping download." >&2
+		return 0
 	fi
 
 	if which -s curl; then
@@ -693,7 +715,7 @@ WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
 Environment=DOORSTOP_ENABLED=1
 Environment=DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
-Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so:\$LD_PRELOAD
+Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
 Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs:\$LD_LIBRARY_PATH
 Environment=SteamAppId=$STEAM_ID
 # Only required for games which utilize Proton
@@ -760,13 +782,16 @@ EOF
 function install_bepinex() {
 	print_header "Installing BepInEx for Valheim"
 
-	if ! download "$BEPINEX_URL" "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"; then
+	DEST="$(echo "$BEPINEX_URL" | sed 's:.*/\(.*\)/\([0-9\.]*\)/:\1-\2.zip:')"
+	[ -e "$GAME_DIR/Packages" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Packages"
+
+	if ! download "$BEPINEX_URL" "$GAME_DIR/Packages/$DEST" --no-overwrite; then
 		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
 		return 1
 	fi
 
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"
-	sudo -u $GAME_USER unzip -o "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Packages"
+	sudo -u $GAME_USER unzip -o "$GAME_DIR/Packages/$DEST" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
 	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
 	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
 	return 0

@@ -13,12 +13,11 @@ WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
 Environment=DOORSTOP_ENABLED=1
 Environment=DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
-Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so:\$LD_PRELOAD
-Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs:\$LD_LIBRARY_PATH
-Environment=SteamAppId=$STEAM_ID
+Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs
+Environment=SteamAppId=892970
 # Only required for games which utilize Proton
 #Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
 ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
 ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
 Restart=on-failure

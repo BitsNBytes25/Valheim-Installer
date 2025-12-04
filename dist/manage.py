@@ -2920,15 +2920,18 @@ def menu_first_run(game: GameApp):
 
 	svc = game.get_services()[0]
 
-	svc.option_ensure_set('Level Name')
-	svc.option_ensure_set('Server Port')
-	svc.option_ensure_set('RCON Port')
+	svc.option_ensure_set('Server Name')
+	svc.option_ensure_set('Game Port')
+	svc.option_ensure_set('Join Password')
+	svc.option_ensure_set('Public Server')
+	'''svc.option_ensure_set('RCON Port')
 	if not svc.option_has_value('RCON Password'):
 		# Generate a random password for RCON
 		random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
 		svc.set_option('RCON Password', random_password)
 	if not svc.option_has_value('Enable RCON'):
 		svc.set_option('Enable RCON', True)
+	'''
 
 if __name__ == '__main__':
 	game = GameApp()

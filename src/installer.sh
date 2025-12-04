@@ -148,6 +148,8 @@ function install_bepinex() {
 
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"
 	sudo -u $GAME_USER unzip -o "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
+	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
 	return 0
 }
 
@@ -174,6 +176,7 @@ function install_management() {
 
 	if ! download "$SRC" "$GAME_DIR/manage.py"; then
 		# Fallback to main branch
+		echo "Download failed, falling back to main branch..." >&2
 		SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/main/dist/manage.py"
 		if ! download "$SRC" "$GAME_DIR/manage.py"; then
 			echo "Could not download management script!" >&2
@@ -218,6 +221,7 @@ function uninstall_application() {
 
 	# Service files
 	[ -e "/etc/systemd/system/${GAME_SERVICE}.service" ] && rm "/etc/systemd/system/${GAME_SERVICE}.service"
+	[ -e "/etc/systemd/system/${GAME_SERVICE}.service.d" ] && rm -r "/etc/systemd/system/${GAME_SERVICE}.service.d"
 
 	# Game files
 	[ -d "$GAME_DIR" ] && rm -rf "$GAME_DIR/AppFiles"

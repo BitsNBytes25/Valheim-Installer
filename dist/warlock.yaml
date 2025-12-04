@@ -13,6 +13,7 @@
     - "--dir=<path> - Use a custom installation directory instead of the default (optional)"
     - "--skip-firewall  - Do not install or configure a system firewall"
     - "--non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)"
+    - "--modded=<auto|modded|vanilla> - Choose between modded or vanilla server DEFAULT=auto"
   image: media/valheim-1920x1080.webp
   icon: media/valheim-128x128.webp
   thumbnail: media/valheim-640x354.webp

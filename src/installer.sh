@@ -28,6 +28,7 @@
 #   OVERRIDE_DIR=--dir=<path> - Use a custom installation directory instead of the default (optional)
 #   SKIP_FIREWALL=--skip-firewall - Do not install or configure a system firewall
 #   NONINTERACTIVE=--non-interactive - Run the installer in non-interactive mode (useful for scripted installs)
+#   MOD_OR_VANILLA=--modded=<auto|modded|vanilla> - Choose between modded or vanilla server DEFAULT=auto
 #
 # Changelog:
 #   20251103 - New installer
@@ -46,6 +47,7 @@ STEAM_ID="896660"
 GAME_USER="steam"
 GAME_DIR="/home/${GAME_USER}/${GAME}"
 GAME_SERVICE="valheim-server"
+BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
 
 # compile:usage
 # compile:argparse
@@ -87,7 +89,7 @@ function install_application() {
 	fi
 
 	# Preliminary requirements
-	package_install curl sudo python3-venv libpulse-dev libatomic1 libc6
+	package_install curl sudo python3-venv unzip
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -102,22 +104,29 @@ function install_application() {
 	install_steamcmd
 	sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
 
-	# If you need to configure the firewall for this game service here,
-	# ensure you include the following header
-	#  # scriptlet:_common/firewall_allow.sh
-	# and then run
-	# firewall_allow --port ${PORT} --udp --comment "${GAME_DESC} Game Port"
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		if ! install_bepinex; then
+			echo "BepInEx installation failed, reverting to vanilla!" >&2
+			MOD_OR_VANILLA="vanilla"
+		fi
+	fi
 
 	# Install system service file to be loaded by systemd
-    cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+# script:systemd-modded-template.service
+EOF
+	else
+    	cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
 # script:systemd-template.service
 EOF
+	fi
 
 	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
 		# Install system override file to be loaded by systemd
 		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
 		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
-# script:systemd-template.service
+# script:systemd-override.service
 EOF
 	fi
     systemctl daemon-reload
@@ -127,6 +136,19 @@ EOF
 		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
 		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
 	fi
+}
+
+function install_bepinex() {
+	print_header "Installing BepInEx for Valheim"
+
+	if ! download "$BEPINEX_URL" "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"; then
+		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
+		return 1
+	fi
+
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"
+	sudo -u $GAME_USER unzip -o "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	return 0
 }
 
 ##
@@ -256,6 +278,15 @@ if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
 	EXISTING=1
 else
 	EXISTING=0
+fi
+
+if [ "$MOD_OR_VANILLA" == "auto" ]; then
+	# Automatic; determine if BepinEx is currently installed.
+	if [ -e "$GAME_DIR/AppFiles/BepInEx" ]; then
+		MOD_OR_VANILLA="modded"
+	else
+		MOD_OR_VANILLA="vanilla"
+	fi
 fi
 
 ############################################

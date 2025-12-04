@@ -28,6 +28,7 @@
 #   --dir=<path> - Use a custom installation directory instead of the default (optional)
 #   --skip-firewall  - Do not install or configure a system firewall
 #   --non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)
+#   --modded=<auto|modded|vanilla> - Choose between modded or vanilla server DEFAULT=auto
 #
 # Changelog:
 #   20251103 - New installer
@@ -46,6 +47,7 @@ STEAM_ID="896660"
 GAME_USER="steam"
 GAME_DIR="/home/${GAME_USER}/${GAME}"
 GAME_SERVICE="valheim-server"
+BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
 
 function usage() {
   cat >&2 <<EOD
@@ -56,6 +58,7 @@ Options:
     --dir=<path> - Use a custom installation directory instead of the default (optional)
     --skip-firewall  - Do not install or configure a system firewall
     --non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)
+    --modded=<auto|modded|vanilla> - Choose between modded or vanilla server DEFAULT=auto
 
 Please ensure to run this script as root (or at least with sudo)
 
@@ -69,6 +72,7 @@ MODE_UNINSTALL=0
 OVERRIDE_DIR=""
 SKIP_FIREWALL=0
 NONINTERACTIVE=0
+MOD_OR_VANILLA="auto"
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--uninstall) MODE_UNINSTALL=1; shift 1;;
@@ -79,6 +83,11 @@ while [ "$#" -gt 0 ]; do
 			shift 1;;
 		--skip-firewall) SKIP_FIREWALL=1; shift 1;;
 		--non-interactive) NONINTERACTIVE=1; shift 1;;
+		--modded=*)
+			MOD_OR_VANILLA="${1#*=}";
+			[ "${MOD_OR_VANILLA:0:1}" == "'" ] && [ "${MOD_OR_VANILLA:0-1}" == "'" ] && MOD_OR_VANILLA="${MOD_OR_VANILLA:1:-1}"
+			[ "${MOD_OR_VANILLA:0:1}" == '"' ] && [ "${MOD_OR_VANILLA:0-1}" == '"' ] && MOD_OR_VANILLA="${MOD_OR_VANILLA:1:-1}"
+			shift 1;;
 		-h|--help) usage;;
 	esac
 done
@@ -645,7 +654,7 @@ function install_application() {
 	fi
 
 	# Preliminary requirements
-	package_install curl sudo python3-venv libpulse-dev libatomic1 libc6
+	package_install curl sudo python3-venv unzip
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -660,14 +669,47 @@ function install_application() {
 	install_steamcmd
 	sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
 
-	# If you need to configure the firewall for this game service here,
-	# ensure you include the following header
-	#  # scriptlet:_common/firewall_allow.sh
-	# and then run
-	# firewall_allow --port ${PORT} --udp --comment "${GAME_DESC} Game Port"
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		if ! install_bepinex; then
+			echo "BepInEx installation failed, reverting to vanilla!" >&2
+			MOD_OR_VANILLA="vanilla"
+		fi
+	fi
 
 	# Install system service file to be loaded by systemd
-    cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+	if [ "$MOD_OR_VANILLA" == "modded" ]; then
+		cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
+[Unit]
+# DYNAMICALLY GENERATED FILE! Edit at your own risk
+Description=$GAME_DESC
+After=network.target
+
+[Service]
+Type=simple
+LimitNOFILE=10000
+User=$GAME_USER
+Group=$GAME_USER
+WorkingDirectory=$GAME_DIR/AppFiles
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
+Environment=DOORSTOP_ENABLED=1
+Environment=DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
+Environment=LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so:\$LD_PRELOAD
+Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs:\$LD_LIBRARY_PATH
+Environment=SteamAppId=$STEAM_ID
+# Only required for games which utilize Proton
+#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
+ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
+ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
+ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
+Restart=on-failure
+RestartSec=1800s
+TimeoutStartSec=600s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	else
+    	cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
 [Unit]
 # DYNAMICALLY GENERATED FILE! Edit at your own risk
 Description=$GAME_DESC
@@ -694,36 +736,16 @@ TimeoutStartSec=600s
 [Install]
 WantedBy=multi-user.target
 EOF
+	fi
 
 	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
 		# Install system override file to be loaded by systemd
 		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
 		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
-[Unit]
-# DYNAMICALLY GENERATED FILE! Edit at your own risk
-Description=$GAME_DESC
-After=network.target
-
 [Service]
-Type=simple
-LimitNOFILE=10000
-User=$GAME_USER
-Group=$GAME_USER
-WorkingDirectory=$GAME_DIR/AppFiles
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-Environment=LD_LIBRARY_PATH=$GAME_DIR/AppFiles:\$LD_LIBRARY_PATH
-Environment=SteamAppId=$STEAM_ID
-# Only required for games which utilize Proton
-#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID} validate +quit
-ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
-ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
-Restart=on-failure
-RestartSec=1800s
-TimeoutStartSec=600s
-
-[Install]
-WantedBy=multi-user.target
+# Edit this line to adjust start parameters of the server
+# After modifying, please remember to run \`sudo systemctl daemon-reload\` to apply changes
+ExecStart=$GAME_DIR/AppFiles/valheim_server.x86_64 -name "My server" -port 2456 -world "Dedicated" -password "secret" -crossplay
 EOF
 	fi
     systemctl daemon-reload
@@ -733,6 +755,19 @@ EOF
 		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
 		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
 	fi
+}
+
+function install_bepinex() {
+	print_header "Installing BepInEx for Valheim"
+
+	if ! download "$BEPINEX_URL" "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"; then
+		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
+		return 1
+	fi
+
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip"
+	sudo -u $GAME_USER unzip -o "$GAME_DIR/AppFiles/BepInExPack_Valheim.zip" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
+	return 0
 }
 
 ##
@@ -802,7 +837,8 @@ cli:
     help: "Override the default save path"
   - name: Public Server
     key: public
-    type: list
+    section: flag
+    type: int
     default: 1
     options:
       - 0
@@ -914,7 +950,7 @@ cli:
     type: bool
     default: false
     help: "If true, passive mobs are enabled."
-  - name: Modifier - No Map Fog
+  - name: Modifier - No Map
     key: setkey nomap
     section: flag
     type: bool
@@ -1077,6 +1113,15 @@ if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
 	EXISTING=1
 else
 	EXISTING=0
+fi
+
+if [ "$MOD_OR_VANILLA" == "auto" ]; then
+	# Automatic; determine if BepinEx is currently installed.
+	if [ -e "$GAME_DIR/AppFiles/BepInEx" ]; then
+		MOD_OR_VANILLA="modded"
+	else
+		MOD_OR_VANILLA="vanilla"
+	fi
 fi
 
 ############################################

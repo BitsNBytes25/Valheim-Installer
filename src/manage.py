@@ -87,7 +87,8 @@ class GameService(BaseService):
 		self.configs = {
 			'cli': CLIConfig('cli', '/etc/systemd/system/%s.service.d/override.conf' % service)
 		}
-		self.configs['cli'].format = 'ExecStart=%s/valheim_server.x86_64 %OPTIONS%' % os.path.join(here, 'AppFiles')
+		self.configs['cli'].format = 'ExecStart=' + os.path.join(here, 'AppFiles') + '/valheim_server.x86_64 [OPTIONS]'
+		self.configs['cli'].flag_sep = ' '
 		self.load()
 
 	def option_value_updated(self, option: str, previous_value, new_value):
@@ -110,6 +111,9 @@ class GameService(BaseService):
 			if previous_value:
 				firewall_remove(int(previous_value), 'udp')
 			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
+
+		# Reload systemd to apply changes
+		subprocess.run(['systemctl', 'daemon-reload'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -158,21 +162,21 @@ class GameService(BaseService):
 		Get the maximum player count allowed on the server
 		:return:
 		"""
-		return self.get_option_value('Max Players')
+		return 10
 
 	def get_name(self) -> str:
 		"""
 		Get the name of this game server instance
 		:return:
 		"""
-		return self.get_option_value('Level Name')
+		return self.get_option_value('Server Name')
 
 	def get_port(self) -> Union[int, None]:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
 		"""
-		return self.get_option_value('Server Port')
+		return self.get_option_value('Game Port')
 
 	def get_game_pid(self) -> int:
 		"""
@@ -182,21 +186,6 @@ class GameService(BaseService):
 
 		# For services that do not have a helper wrapper, it's the same as the process PID
 		return self.get_pid()
-
-		# For services that use a wrapper script, the actual game process will be different and needs looked up.
-		'''
-		# There's no quick way to get the game process PID from systemd,
-		# so use ps to find the process based on the map name
-		processes = subprocess.run([
-			'ps', 'axh', '-o', 'pid,cmd'
-		], stdout=subprocess.PIPE).stdout.decode().strip()
-		exe = os.path.join(here, 'AppFiles/Vein/Binaries/Linux/VeinServer-Linux-')
-		for line in processes.split('\n'):
-			pid, cmd = line.strip().split(' ', 1)
-			if cmd.startswith(exe):
-				return int(line.strip().split(' ')[0])
-		return 0
-		'''
 
 	def send_message(self, message: str):
 		"""

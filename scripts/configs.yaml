@@ -30,7 +30,8 @@ cli:
     help: "Override the default save path"
   - name: Public Server
     key: public
-    type: list
+    section: flag
+    type: int
     default: 1
     options:
       - 0
@@ -142,7 +143,7 @@ cli:
     type: bool
     default: false
     help: "If true, passive mobs are enabled."
-  - name: Modifier - No Map Fog
+  - name: Modifier - No Map
     key: setkey nomap
     section: flag
     type: bool

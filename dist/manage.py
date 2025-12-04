@@ -688,11 +688,18 @@ class BaseApp:
 				src = os.path.join(save_source, f)
 				dst = os.path.join(temp_store, 'save', f)
 				if os.path.exists(src):
-					print('Backing up save file: %s' % src)
 					if os.path.isfile(src):
+						print('Backing up save file: %s' % src)
+						if not os.path.exists(os.path.dirname(dst)):
+							os.makedirs(os.path.dirname(dst))
 						shutil.copy(src, dst)
 					else:
-						shutil.copytree(src, dst)
+						print('Backing up save directory: %s' % src)
+						if not os.path.exists(dst):
+							os.makedirs(dst)
+						shutil.copytree(src, dst, dirs_exist_ok=True)
+				else:
+					print('Save file %s does not exist, skipping...' % src, file=sys.stderr)
 
 		return temp_store
 
@@ -1381,13 +1388,6 @@ class BaseService:
 		"""
 		pass
 
-	def post_start(self) -> bool:
-		"""
-		Perform the necessary operations for after a game has started
-		:return:
-		"""
-		pass
-
 	def start(self):
 		"""
 		Start this service in systemd
@@ -1520,7 +1520,8 @@ class BaseService:
 		"""
 		if self.is_api_enabled():
 			counter = 0
-			print('Waiting for API to become available...')
+			print('Waiting for API to become available...', file=sys.stderr)
+			time.sleep(15)
 			while counter < 24:
 				players = self.get_player_count()
 				if players is not None:
@@ -1531,7 +1532,16 @@ class BaseService:
 						self.game.send_discord_message(msg)
 					return True
 				else:
-					print('API not available yet')
+					print('API not available yet', file=sys.stderr)
+
+				# Is the game PID still available?
+				if self.get_pid() == 0:
+					print('Game process has exited unexpectedly!', file=sys.stderr)
+					return False
+
+				if self.get_game_pid() == 0:
+					print('Game server process has exited unexpectedly!', file=sys.stderr)
+					return False
 
 				time.sleep(10)
 				counter += 1
@@ -1601,7 +1611,7 @@ class BaseConfig:
 								option.get('name'),
 								option.get('section'),
 								option.get('key'),
-								option.get('default'),
+								option.get('default', None),
 								option.get('type', 'str'),
 								option.get('help', ''),
 								option.get('options', None)
@@ -1622,10 +1632,14 @@ class BaseConfig:
 
 		# Ensure boolean defaults are stored as strings
 		# They get re-converted back to bools on retrieval
-		if val_type == 'bool' and default is True:
-			default = 'True'
-		elif val_type == 'bool' and default is False:
-			default = 'False'
+		if val_type == 'bool':
+			if default is True:
+				default = 'True'
+			elif default is False:
+				default = 'False'
+			elif default is None:
+				# No default specified, default to False
+				default = 'False'
 
 		if default is None:
 			default = ''
@@ -1913,7 +1927,14 @@ class CLIConfig(BaseConfig):
 		Optional format of the line in the file that contains the arguments.
 		If set will be used to automatically extract and parse the command flags.
 		
-		Use %OPTIONS% to denote where options should be injected.
+		Use [OPTIONS] to denote where options should be injected.
+		"""
+
+		self.flag_sep = '='
+		"""
+		:type str:
+		Some applications expect flag key/values to be separated by a space or by an '=' character.
+		If set, this will be used when saving the configuration back to file.
 		"""
 
 	def get_value(self, name: str) -> Union[str, int, bool]:
@@ -1933,7 +1954,11 @@ class CLIConfig(BaseConfig):
 		val_type = self.options[name][3]
 		val = self.values.get(name, default)
 
-		return BaseConfig.convert_to_system_type(val, val_type)
+		if val_type == 'bool':
+			# CLI arguments treat booleans differently; they are true if they are present in general.
+			return val == '' or val.lower() == 'true'
+		else:
+			return BaseConfig.convert_to_system_type(val, val_type)
 
 	def set_value(self, name: str, value: Union[str, int, bool]):
 		"""
@@ -1968,7 +1993,7 @@ class CLIConfig(BaseConfig):
 		Check if the config file exists on disk
 		:return:
 		"""
-		return False
+		return self.path is not None and os.path.exists(self.path)
 
 	def load(self, arguments: str = ''):
 		"""
@@ -1977,8 +2002,8 @@ class CLIConfig(BaseConfig):
 		"""
 		if self.path is not None and os.path.exists(self.path) and self.format is not None:
 			# Load the file and extract the arguments line
-			if '%OPTIONS%' in self.format:
-				match = self.format[:self.format.index('%OPTIONS%')].strip()
+			if '[OPTIONS]' in self.format:
+				match = self.format[:self.format.index('[OPTIONS]')].strip()
 			else:
 				match = self.format.strip()
 
@@ -1991,10 +2016,9 @@ class CLIConfig(BaseConfig):
 						break
 
 		# Use a tokenizer to parse options and flags
-		options_done = False
+		buffer = ''
+		args = []
 		quote = None
-		param = ''
-		values = []
 		# Add a space at the end to flush the last param
 		arguments += ' '
 		for c in arguments:
@@ -2005,67 +2029,129 @@ class CLIConfig(BaseConfig):
 				quote = None
 				continue
 
-			if not options_done and quote is None and c in ['?', ' ']:
-				# '?' separates options
-				if param == '':
-					continue
+			if quote is not None:
+				# Quoted strings always just get appended to the buffer
+				buffer += c
+				continue
 
-				if '=' in param:
-					opt_key, opt_val = param.split('=', 1)
-					values.append((opt_key, opt_val, 'option'))
-				else:
-					values.append((param, '', 'option'))
+			if c in [' ', '?', '-']:
+				# These denote separators
+				# Flush the buffer first
+				if buffer.strip() != '':
+					args.append(buffer.strip())
+				buffer = c
+			else:
+				# Normal character, just append to buffer
+				buffer += c
 
-				# Reset for next param
-				param = ''
-				if c == ' ':
+		options_done = False
+		values = []
+		# Split args into options and flags as they behave differently.
+		for arg in args:
+			if not options_done:
+				if arg.startswith('-'):
+					# Flags start here
 					options_done = True
-				continue
 
-			if options_done and quote is None and c == '-':
-				# Tack can be safely ignored
-				continue
-
-			if options_done and quote is None and c == ' ':
-				# ' ' separates flags
-				if param == '':
+				else:
+					# Option
+					if arg.startswith('?'):
+						arg = arg[1:]
+					if '=' in arg:
+						opt_key, opt_val = arg.split('=', 1)
+						values.append([opt_key, opt_val, 'option'])
+					else:
+						values.append([arg, '', 'option'])
 					continue
 
-				if '=' in param:
-					opt_key, opt_val = param.split('=', 1)
-					values.append((opt_key, opt_val, 'flag'))
+			# Flag
+			if arg.startswith('-'):
+				arg = arg[1:]
+				if '=' in arg:
+					opt_key, opt_val = arg.split('=', 1)
+					values.append([opt_key, opt_val, 'flag'])
 				else:
-					opt_key = param
-					values.append((opt_key, '', 'flag'))
+					values.append([arg, '', 'flag'])
+			else:
+				# Continuation of a previous argument probably.
+				idx = len(values) - 1
+				if idx >= 0:
+					if values[idx][1] == '':
+						values[idx][1] = arg
+					elif isinstance(values[idx][1], list):
+						values[idx][1].append(arg)
+					else:
+						values[idx][1] = [values[idx][1], arg]
 
-				param = ''
-				continue
+		# Build a simple list of known options by their key
+		opts = {}
+		for o in self.options:
+			opts[self.options[o][1]] = o
 
-			# Default behaviour; just append the character
-			param += c
-
-		# Arguments have been pulled from the command line, now set the values based on the options available
+		# Compare against known options and set values
 		for val in values:
 			opt_key, opt_val, opt_group = val
-			lower_key = opt_key.lower()
-			if lower_key in self._keys:
-				actual_key = self._keys[lower_key]
-				section = self.options[actual_key][0]
-				val_type = self.options[actual_key][3]
-				if section != opt_group:
-					print('Option type mismatch for %s: expected %s, got %s' % (opt_key, section, opt_group), file=sys.stderr)
-					continue
+			option = None
+			if opt_key in opts:
+				option = opts[opt_key]
+			elif isinstance(opt_val, list):
+				# Some values can be complicated, ie: with Valheim "modifier portals casual"
+				# This may be mapped to "modifier portals" with the value of "casual"
+				check = opt_key
+				i = 0
+				while i < len(opt_val):
+					val = opt_val[i]
+					i += 1
+					check += ' ' + val
+					if check in opts:
+						option = opts[check]
+						opt_val = opt_val[i:]
+						if len(opt_val) == 1:
+							opt_val = opt_val[0]
+						elif len(opt_val) == 0:
+							opt_val = ''
+						break
+			elif opt_val != '':
+				# Check for single-value extensions
+				if (opt_key + ' ' + opt_val) in opts:
+					option = opts[opt_key + ' ' + opt_val]
+					opt_val = ''
 
-				if opt_val == '' and val_type == 'bool':
-					# Allow boolean flags to be set without a value
-					self.values[actual_key] = 'True'
-				else:
-					self.values[actual_key] = opt_val
-			else:
-				print('Unknown option: %s, not present in configuration!' % opt_key, file=sys.stderr)
+			if option is None:
+				print('Could not find option for key: %s' % (opt_key, ), file=sys.stderr)
+				continue
+
+			self.values[option] = opt_val
 
 	def save(self):
-		pass
+		if self.path is not None and os.path.exists(self.path) and self.format is not None:
+			# Load the file and extract the arguments line
+			if '[OPTIONS]' in self.format:
+				match = self.format[:self.format.index('[OPTIONS]')].strip()
+			else:
+				match = self.format.strip()
+
+			new_cmd = str(self)
+			if new_cmd.startswith('?'):
+				if '?' in match:
+					# Run them together
+					new_cmd = match + new_cmd
+				else:
+					# Remove leading '?' if the match includes it
+					new_cmd = match + new_cmd[1:]
+			else:
+				new_cmd = match + ' ' + new_cmd
+			new_contents = []
+			with open(self.path, 'r') as f:
+				for line in f:
+					line = line.strip()
+					if line.startswith(match):
+						# Replace this line with the new rendered options
+						line = new_cmd
+					new_contents.append(line)
+
+			with open(self.path, 'w') as f:
+				f.write('\n'.join(new_contents) + '\n')
 
 	def __str__(self) -> str:
 		opts = []
@@ -2082,16 +2168,11 @@ class CLIConfig(BaseConfig):
 			raw_val = self.values[name]
 
 			if val_type == 'bool':
-				if raw_val.lower() in ('true', '1', 'yes'):
+				if raw_val.lower() in ('true', '1', 'yes', ''):
 					if section == 'flag':
-						flags.append('-%s=True' % key)
+						flags.append('-%s' % key)
 					else:
 						opts.append('%s=True' % key)
-				else:
-					if section == 'flag':
-						flags.append('-%s=False' % key)
-					else:
-						opts.append('%s=False' % key)
 			else:
 				if '"' in raw_val:
 					raw_val = "'%s'" % raw_val
@@ -2101,11 +2182,16 @@ class CLIConfig(BaseConfig):
 				if raw_val != '':
 					# Only append keys that have values.
 					if section == 'flag':
-						flags.append('-%s=%s' % (key, raw_val))
+						flags.append('-%s%s%s' % (key, self.flag_sep, raw_val))
 					else:
 						opts.append('%s=%s' % (key, raw_val))
 
-		return '%s %s' % ('?'.join(opts), ' '.join(flags))
+		ret = []
+		if len(opts) > 0:
+			ret.append('?' + '?'.join(opts))
+		if len(flags) > 0:
+			ret.append(' '.join(flags))
+		return ' '.join(ret)
 
 
 def menu_get_services(game):
@@ -2703,7 +2789,8 @@ class GameService(BaseService):
 		self.configs = {
 			'cli': CLIConfig('cli', '/etc/systemd/system/%s.service.d/override.conf' % service)
 		}
-		self.configs['cli'].format = 'ExecStart=%s/valheim_server.x86_64 %OPTIONS%' % os.path.join(here, 'AppFiles')
+		self.configs['cli'].format = 'ExecStart=' + os.path.join(here, 'AppFiles') + '/valheim_server.x86_64 [OPTIONS]'
+		self.configs['cli'].flag_sep = ' '
 		self.load()
 
 	def option_value_updated(self, option: str, previous_value, new_value):
@@ -2726,6 +2813,9 @@ class GameService(BaseService):
 			if previous_value:
 				firewall_remove(int(previous_value), 'udp')
 			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
+
+		# Reload systemd to apply changes
+		subprocess.run(['systemctl', 'daemon-reload'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -2774,21 +2864,21 @@ class GameService(BaseService):
 		Get the maximum player count allowed on the server
 		:return:
 		"""
-		return self.get_option_value('Max Players')
+		return 10
 
 	def get_name(self) -> str:
 		"""
 		Get the name of this game server instance
 		:return:
 		"""
-		return self.get_option_value('Level Name')
+		return self.get_option_value('Server Name')
 
 	def get_port(self) -> Union[int, None]:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
 		"""
-		return self.get_option_value('Server Port')
+		return self.get_option_value('Game Port')
 
 	def get_game_pid(self) -> int:
 		"""
@@ -2798,21 +2888,6 @@ class GameService(BaseService):
 
 		# For services that do not have a helper wrapper, it's the same as the process PID
 		return self.get_pid()
-
-		# For services that use a wrapper script, the actual game process will be different and needs looked up.
-		'''
-		# There's no quick way to get the game process PID from systemd,
-		# so use ps to find the process based on the map name
-		processes = subprocess.run([
-			'ps', 'axh', '-o', 'pid,cmd'
-		], stdout=subprocess.PIPE).stdout.decode().strip()
-		exe = os.path.join(here, 'AppFiles/Vein/Binaries/Linux/VeinServer-Linux-')
-		for line in processes.split('\n'):
-			pid, cmd = line.strip().split(' ', 1)
-			if cmd.startswith(exe):
-				return int(line.strip().split(' ')[0])
-		return 0
-		'''
 
 	def send_message(self, message: str):
 		"""

@@ -186,6 +186,15 @@ class GameService(BaseService):
 		"""
 		self._api_cmd('save-all flush')
 
+	def get_port_definitions(self) -> list:
+		"""
+		Get a list of port definitions for this service
+		:return:
+		"""
+		return [
+			('Game Port', 'udp', '%s game port' % self.game.desc)
+		]
+
 
 def menu_first_run(game: GameApp):
 	"""

@@ -105,7 +105,7 @@ function install_application() {
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO" "$INSTALLER_VERSION"
+	install_warlock_manager "$REPO"
 
 	if ! $GAME_DIR/manage.py --update; then
 		echo "Could not install $GAME_DESC, exiting" >&2

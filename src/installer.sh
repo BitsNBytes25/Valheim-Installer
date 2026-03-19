@@ -224,7 +224,7 @@ if [ -e "$GAME_DIR/Environments" ]; then
 	for envfile in "$GAME_DIR/Environments/"*.env; do
 		SERVICE=$(basename "$envfile" .env)
 		# If there are no services, this will just be '*.env'.
-		if [ "$SERVICE" != "*.env" ]; then
+		if [ "$SERVICE" != "*" ]; then
 			if systemctl -q is-active $SERVICE; then
 				echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
 				echo "You can do this with: sudo systemctl stop $SERVICE"

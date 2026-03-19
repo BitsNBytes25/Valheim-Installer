@@ -82,6 +82,8 @@ print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 #
 function install_application() {
 	print_header "Performing install_application"
+	local USER_HOME
+	local GAME_CONFIG_PATH
 
 	# Create the game user account
 	# This will create the account with no password, so if you need to log in with this user,
@@ -109,6 +111,12 @@ function install_application() {
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
 	[ -e "$GAME_DIR/Environments" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
 	[ -e "$GAME_DIR/Configs" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Configs"
+
+	# Valheim stores worlds in the user's home directory, ensure that exists and is linked.
+	USER_HOME="$(getent passwd $GAME_USER | cut -d: -f6)"
+	GAME_CONFIG_PATH="$USER_HOME/.config/unity3d/IronGate/Valheim"
+	[ -e "$GAME_CONFIG_PATH/worlds_local" ] || sudo -u $GAME_USER mkdir -p "$GAME_CONFIG_PATH/worlds_local"
+	[ -L "$GAME_DIR/AppFiles/Worlds" ] || sudo -u $GAME_USER ln -s "$GAME_CONFIG_PATH/worlds_local" "$GAME_DIR/AppFiles/Worlds"
 
 
 	install_steamcmd

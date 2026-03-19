@@ -16,12 +16,10 @@ sys.path.insert(
 		'python' + '.'.join(sys.version.split('.')[:2]), 'site-packages'
 	)
 )
-import yaml
 from warlock_manager.apps.steam_app import SteamApp
 from warlock_manager.formatters.cli_formatter import cli_formatter
 from warlock_manager.services.base_service import BaseService
 from warlock_manager.config.ini_config import INIConfig
-from warlock_manager.config.properties_config import PropertiesConfig
 from warlock_manager.libs.app_runner import app_runner
 from warlock_manager.libs.firewall import Firewall
 # To allow running as a standalone script without installing the package, include the venv path for imports.
@@ -29,7 +27,6 @@ from warlock_manager.libs.firewall import Firewall
 #
 # IMPORTANT - any imports that are needed for the script to run must be after this,
 # otherwise the imports will fail when running as a standalone script.
-
 
 # Import the appropriate type of handler for the game installer.
 # Common options are:
@@ -45,6 +42,7 @@ from warlock_manager.libs.firewall import Firewall
 # Common options are:
 # from warlock_manager.config.cli_config import CLIConfig
 # from warlock_manager.config.json_config import JSONConfig
+# from warlock_manager.config.properties_config import PropertiesConfig
 # from warlock_manager.config.unreal_config import UnrealConfig
 
 # Load the application runner responsible for interfacing with CLI arguments
@@ -65,6 +63,7 @@ class GameApp(SteamApp):
 		self.desc = 'Valheim game server'
 		self.steam_id = '896660'
 		self.service_handler = GameService
+		self.service_prefix = 'valheim-'
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(self.get_app_directory(), '.settings.ini'))
@@ -142,9 +141,24 @@ class GameService(BaseService):
 		'''
 		return {
 			'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
-			'LD_LIBRARY_PATH': self.get_app_directory(),
+			'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'linux64'),
 			'SteamAppId': '892970'
 		}
+
+	def get_save_files(self) -> list | None:
+		"""
+		Get the list of supplemental files or directories for this game, or None if not applicable
+
+		This list of files **should not** be fully resolved, and will use `self.get_app_directory()` as the base path.
+		For example, to return `AppFiles/SaveData` and `AppFiles/Config`:
+
+		```python
+		return ['SaveData', 'Config']
+		```
+
+		:return:
+		"""
+		return ['Worlds/%s.fwl' % self.get_option_value('World Name')]
 
 	def option_value_updated(self, option: str, previous_value, new_value):
 		"""
@@ -156,16 +170,13 @@ class GameService(BaseService):
 		"""
 
 		# Special option actions
-		if option == 'Server Port':
-			# Update firewall for game port change
-			if previous_value:
-				Firewall.remove(int(previous_value), 'tcp')
-			Firewall.allow(int(new_value), 'tcp', '%s game port' % self.game.desc)
-		elif option == 'Query Port':
+		if option == 'Game Port':
 			# Update firewall for game port change
 			if previous_value:
 				Firewall.remove(int(previous_value), 'udp')
-			Firewall.allow(int(new_value), 'udp', '%s query port' % self.game.desc)
+				Firewall.remove(int(previous_value)+1, 'udp')
+			Firewall.allow(int(new_value), 'udp', '%s game port' % self.game.desc)
+			Firewall.allow(int(new_value)+1, 'udp', '%s query port' % self.game.desc)
 
 		# Reload systemd to apply changes
 		self.build_systemd_config()
@@ -229,7 +240,8 @@ class GameService(BaseService):
 		:return:
 		"""
 		return [
-			('Game Port', 'udp', '%s game port' % self.game.desc)
+			('Game Port', 'udp', '%s game port' % self.game.desc),
+			(self.get_option_value('Game Port')+1, 'udp', '%s query port' % self.game.desc)
 		]
 
 

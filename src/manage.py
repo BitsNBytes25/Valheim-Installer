@@ -15,6 +15,7 @@ import yaml
 # Common options are:
 # from warlock_manager.apps.base_app import BaseApp
 from warlock_manager.apps.steam_app import SteamApp
+from warlock_manager.formatters.cli_formatter import cli_formatter
 
 # Import the appropriate type of handler for the game services.
 # Common options are:
@@ -38,8 +39,6 @@ from warlock_manager.libs.app_runner import app_runner
 # If your script manages the firewall, (recommended), import the Firewall library
 from warlock_manager.libs.firewall import Firewall
 
-here = os.path.dirname(os.path.realpath(__file__))
-
 
 class GameApp(SteamApp):
 	"""
@@ -55,7 +54,7 @@ class GameApp(SteamApp):
 		self.service_handler = GameService
 
 		self.configs = {
-			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
+			'manager': INIConfig('manager', os.path.join(self.get_app_directory(), '.settings.ini'))
 		}
 		self.load()
 
@@ -69,6 +68,9 @@ class GameApp(SteamApp):
 		if os.geteuid() != 0:
 			logging.error('Please run this script with sudo to perform first-run configuration.')
 			return False
+
+		# Install the game with Steam.
+		self.update()
 
 		services = self.get_services()
 		if len(services) == 0:
@@ -93,7 +95,7 @@ class GameService(BaseService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'service': INIConfig('service', os.path.join(self.get_app_directory(), '.%s.ini' % self.service))
+			'service': INIConfig('service', os.path.join(self.game.get_app_directory(), 'Configs', 'service.%s.ini' % self.service))
 		}
 		self.load()
 
@@ -102,7 +104,14 @@ class GameService(BaseService):
 		Get the full executable for this game service
 		:return:
 		"""
-		return os.path.join(self.get_app_directory(), 'valheim_server.x86_64')
+		path = os.path.join(self.get_app_directory(), 'valheim_server.x86_64')
+
+		# Add arguments for the service
+		args = cli_formatter(self.configs['service'], 'flag')
+		if args:
+			path += ' ' + args
+
+		return path
 
 	def get_environment(self) -> dict:
 		"""
@@ -148,6 +157,21 @@ class GameService(BaseService):
 		# Reload systemd to apply changes
 		self.build_systemd_config()
 		self.reload()
+
+	def create_service(self):
+		"""
+		Create the systemd service for this game, including the service file and environment file
+		:return:
+		"""
+
+		# Ensure some required parameters are set
+		if not self.option_has_value('Server Name'):
+			self.set_option('Server Name', self.service)
+		if not self.option_has_value('World Name'):
+			self.set_option('World Name', self.service)
+		self.option_ensure_set('Join Password')
+
+		super().create_service()
 
 	def is_api_enabled(self) -> bool:
 		"""

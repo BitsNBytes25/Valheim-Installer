@@ -108,11 +108,12 @@ function install_application() {
 
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
 	[ -e "$GAME_DIR/Environments" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
+	[ -e "$GAME_DIR/Configs" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Configs"
 
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO" "$BRANCH"
+	install_warlock_manager "$REPO" "$BRANCH" "main"
 
 	#if [ "$MOD_OR_VANILLA" == "modded" ]; then
 	#	if ! install_bepinex; then
@@ -158,6 +159,7 @@ function upgrade_application() {
 	print_header "Existing installation detected, performing upgrade"
 
 	# Migrate existing service to new format
+	# This gets overwrote by the manager, but is needed to tell the system that the service is here.
 	if [ -e /etc/systemd/system/valheim-server.service ] && [ ! -e "$GAME_DIR/Environments" ]; then
 		sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
 		egrep '^Environment' /etc/systemd/system/valheim-server.service | sed 's:^Environment=::' > "$GAME_DIR/Environments/valheim-server.env"
@@ -183,15 +185,17 @@ function postinstall() {
 function uninstall_application() {
 	print_header "Performing uninstall_application"
 
-	systemctl disable $GAME_SERVICE
-	systemctl stop $GAME_SERVICE
-
-	# Service files
-	[ -e "/etc/systemd/system/${GAME_SERVICE}.service" ] && rm "/etc/systemd/system/${GAME_SERVICE}.service"
-	[ -e "/etc/systemd/system/${GAME_SERVICE}.service.d" ] && rm -r "/etc/systemd/system/${GAME_SERVICE}.service.d"
+	for envfile in "$GAME_DIR/Environments/"*.env; do
+		SERVICE="$(basename "$envfile" .env)"
+		if [ "$SERVICE" != "*" ]; then
+			$GAME_DIR/manage.py remove-service --service "$SERVICE"
+		fi
+	done
 
 	# Game files
-	[ -d "$GAME_DIR" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
+	[ -d "$GAME_DIR/Configs" ] && rm -rf "$GAME_DIR/Configs"
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"

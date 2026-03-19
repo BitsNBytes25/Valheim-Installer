@@ -38,7 +38,7 @@
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20251204"
+INSTALLER_VERSION="v20260319"
 GAME="Valheim"
 GAME_DESC="Valheim Dedicated Server"
 REPO="BitsNBytes25/Valheim-Installer"
@@ -222,7 +222,7 @@ if [ -e "$GAME_DIR/Environments" ]; then
 	# Check for existing service files to determine if the service is running.
 	# This is important to prevent conflicts with the installer trying to modify files while the service is running.
 	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE=$(basename "$envfile" .env)
+		SERVICE="$(basename "$envfile" .env)"
 		# If there are no services, this will just be '*.env'.
 		if [ "$SERVICE" != "*" ]; then
 			if systemctl -q is-active $SERVICE; then

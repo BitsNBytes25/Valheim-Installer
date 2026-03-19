@@ -52,6 +52,8 @@ class GameApp(SteamApp):
 		self.service_handler = GameService
 		self.service_prefix = 'valheim-'
 
+		self.disabled_features = {'api'}
+
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(self.get_app_directory(), '.settings.ini'))
 		}

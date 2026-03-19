@@ -914,24 +914,35 @@ service:
     default: "My server"
     type: str
     help: "The name of your server as it appears in server browsers."
+    group: Basic
+  - name: Modded Instance
+    key: modded
+    section: other
+    type: bool
+    default: false
+    help: "Set to true if your server is a modded instance, will auto-install BepInEx."
+    group: Settings
   - name: Game Port
     key: port
     section: flag
     default: 2456
     type: int
     help: "The port number your server will use for game connections."
+    group: Settings
   - name: World Name
     key: world
     section: flag
     default: "Dedicated"
     type: str
     help: "The name of the world your server will load or create."
+    group: Settings
   - name: Join Password
     key: password
     section: flag
     default: "secret"
     type: str
     help: "The password required for players to join your server."
+    group: Basic
   - name: Save Directory
     key: savedir
     section: flag
@@ -946,6 +957,7 @@ service:
       - 0
       - 1
     help: "Set to 1 to make this a public server listed on the server browser, or 0 to make it private."
+    group: Basic
   - name: Log File
     key: logFile
     section: flag
@@ -975,11 +987,13 @@ service:
     type: bool
     default: true
     help: "Enable crossplay support for different platforms."
+    group: Basic
   - name: Instance ID
     key: instanceid
     section: flag
     type: str
     help: "Unique identifier for this server instance (used for multi-instance setups)."
+    group: Settings
   - name: Preset
     key: preset
     section: flag
@@ -993,6 +1007,7 @@ service:
       - Immersive
       - Hammer
     help: "Specify a preset configuration for the server."
+    group: Difficulty
   - name: Modifier (Combat)
     key: modifier combat
     section: flag
@@ -1003,6 +1018,7 @@ service:
       - hard
       - veryhard
     help: "Set the combat difficulty modifier."
+    group: Difficulty
   - name: Modifier (Death Penalty)
     key: modifier deathpenalty
     section: flag
@@ -1014,6 +1030,7 @@ service:
       - hard
       - hardcore
     help: "Set the death penalty modifier."
+    group: Difficulty
   - name: Modifier (Resources)
     key: modifier resources
     section: flag
@@ -1025,6 +1042,7 @@ service:
       - muchmore
       - most
     help: "Set the resource availability modifier."
+    group: Difficulty
   - name: Modifier (Portals)
     key: modifier portals
     section: flag
@@ -1034,30 +1052,35 @@ service:
       - hard
       - veryhard
     help: "Portals modifier in the game."
+    group: Difficulty
   - name: Modifier - No Build Cost
     key: setkey nobuildcost
     section: flag
     type: bool
     default: false
     help: "If true, building structures will have no resource cost."
+    group: Difficulty
   - name: Modifier - Player Events
     key: setkey playerevents
     section: flag
     type: bool
     default: false
     help: "If true, player events are enabled."
+    group: Difficulty
   - name: Modifier - Passive Mobs
     key: setkey passivemobs
     section: flag
     type: bool
     default: false
     help: "If true, passive mobs are enabled."
+    group: Difficulty
   - name: Modifier - No Map
     key: setkey nomap
     section: flag
     type: bool
     default: false
     help: "If true, no map will be available."
+    group: Difficulty
 manager:
   - name: Shutdown Warning 5 Minutes
     section: Messages

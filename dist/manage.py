@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import logging
 import os
+import zipfile
 import sys
 # Include the virtual environment site-packages in sys.path
 here = os.path.dirname(os.path.realpath(__file__))
@@ -18,6 +19,7 @@ sys.path.insert(
 )
 from warlock_manager.apps.steam_app import SteamApp
 from warlock_manager.formatters.cli_formatter import cli_formatter
+from warlock_manager.libs.download import download_json, download_file
 from warlock_manager.services.base_service import BaseService
 from warlock_manager.config.ini_config import INIConfig
 from warlock_manager.libs.app_runner import app_runner
@@ -95,6 +97,19 @@ class GameApp(SteamApp):
 			logging.info('Detected %d services, skipping first-run service creation.' % len(services))
 		return True
 
+	def get_mod(self, mod_id: str):
+		data = download_json(self, 'https://thunderstore.io/c/valheim/api/v1/package/')
+		for field in data:
+			if field['uuid4'] == mod_id:
+				return field
+		return None
+
+	def get_mods(self):
+		# c11edf2c-85d9-42ff-811b-139faa4c51b3
+
+		svc = self.get_service('valheim-test4')
+		svc.add_mod('c11edf2c-85d9-42ff-811b-139faa4c51b3')
+
 
 class GameService(BaseService):
 	"""
@@ -134,18 +149,21 @@ class GameService(BaseService):
 		:return:
 		"""
 
-		# @todo Support for BepinEx:
-		'''
-		DOORSTOP_ENABLED=1
-		DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
-		LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
-		LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs
-		'''
-		return {
-			'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
-			'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'linux64'),
-			'SteamAppId': '892970'
-		}
+		if self.get_option_value('Modded Instance'):
+			return {
+				'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
+				'LD_PRELOAD': os.path.join(self.get_app_directory(), 'doorstop_libs', 'libdoorstop_x64.so'),
+				'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'doorstop_libs') + ':' + os.path.join(self.get_app_directory(), 'linux64'),
+				'SteamAppId': '892970',
+				'DOORSTOP_ENABLED': '1',
+				'DOORSTOP_TARGET_ASSEMBLY': os.path.join(self.get_app_directory(), 'BepInEx', 'core', 'BepInEx.Preloader.dll')
+			}
+		else:
+			return {
+				'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
+				'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'linux64'),
+				'SteamAppId': '892970'
+			}
 
 	def get_save_files(self) -> list | None:
 		"""
@@ -179,6 +197,15 @@ class GameService(BaseService):
 				Firewall.remove(int(previous_value)+1, 'udp')
 			Firewall.allow(int(new_value), 'udp', '%s game port' % self.game.desc)
 			Firewall.allow(int(new_value)+1, 'udp', '%s query port' % self.game.desc)
+		elif option == 'Modded Instance':
+			if new_value:
+				# Install BepInEx
+				self.add_mod('c11edf2c-85d9-42ff-811b-139faa4c51b3')
+			# Regenerate the environmental file
+			with open(self._env_file, 'w') as f:
+				env = self.get_environment()
+				for key in env:
+					f.write('%s=%s\n' % (key, env[key]))
 
 		# Reload systemd to apply changes
 		self.build_systemd_config()
@@ -191,13 +218,78 @@ class GameService(BaseService):
 		"""
 
 		# Ensure some required parameters are set
-		if not self.option_has_value('Server Name'):
-			self.set_option('Server Name', self.service)
-		if not self.option_has_value('World Name'):
-			self.set_option('World Name', self.service)
+		self.set_option('Server Name', self.service)
+		self.set_option('World Name', self.service)
 		self.option_ensure_set('Join Password')
+		self.set_option('Instance ID', self.service)
 
 		super().create_service()
+
+	def add_mod(self, mod_id: str, version: str = None):
+		"""
+		Install a mod on the server based on the mod UUID.
+
+		This installs from Thunderstore.
+
+		:param mod_id:
+		:param version:
+		:return:
+		"""
+		logging.debug('Installing mod %s' % mod_id)
+
+		mod = self.game.get_mod(mod_id)
+		if mod is None:
+			logging.error('Mod not found: %s' % mod_id)
+			return False
+		else:
+			logging.debug('Mod resolved to %s by %s' % (mod['name'], mod['owner']))
+
+		version_data = None
+		if version is not None:
+			# Find the requested version.
+			for v in mod['versions']:
+				if v['version_number'] == version:
+					version_data = v
+					break
+		else:
+			# Latest version is generally the first entry.
+			version_data = mod['versions'][0] if mod['versions'] and len(mod['versions']) > 0 else None
+
+		if version_data is None:
+			logging.error('Mod version not found: %s' % version)
+			return False
+
+		target_archive = os.path.join(self.game.get_app_directory(), 'Packages', version_data['full_name'] + '.zip')
+		if not os.path.exists(target_archive):
+			download_file(self.game, version_data['download_url'], target_archive)
+		else:
+			logging.debug('Mod already downloaded, skipping download')
+
+		# Try to extract it in a way that makes sense
+		logging.debug('Extracting mod to game directory')
+		with zipfile.ZipFile(target_archive, 'r') as zip_ref:
+			for member in zip_ref.namelist():
+				if member in ['CHANGELOG.md', 'icon.png', 'manifest.json', 'README.md']:
+					# Skip common non-essential files
+					continue
+
+				if member.startswith('plugins/'):
+					# These can be extract directly, they're probably well formatted
+					target_path = os.path.join(self.get_app_directory(), 'BepInEx', member)
+				elif member.startswith('BepInExPack_Valheim/'):
+					# These need to be pulled out of the directory they're in and should be in the root
+					target_path = os.path.join(self.get_app_directory(), member.replace('BepInExPack_Valheim/', ''))
+				else:
+					# A number of developers just throw their DLLs in the root level of their zip
+					target_path = os.path.join(self.get_app_directory(), 'BepInEx', 'plugins', member)
+
+				logging.debug('Extracting %s -> %s' % (member, target_path))
+				# Ensure the target directory exists
+				self.game.ensure_file_parent_exists(target_path)
+				if not member.endswith('/'):
+					with zip_ref.open(member) as source, open(target_path, 'wb') as target:
+						target.write(source.read())
+					self.game.ensure_file_ownership(target_path)
 
 	def is_api_enabled(self) -> bool:
 		"""

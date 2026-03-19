@@ -28,7 +28,7 @@
 #   OVERRIDE_DIR=--dir=<path> - Use a custom installation directory instead of the default (optional)
 #   SKIP_FIREWALL=--skip-firewall - Do not install or configure a system firewall
 #   NONINTERACTIVE=--non-interactive - Run the installer in non-interactive mode (useful for scripted installs)
-#   MOD_OR_VANILLA=--modded=<auto|modded|vanilla> - Choose between modded or vanilla server DEFAULT=auto
+#   BRANCH=--branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 #
 # Changelog:
 #   20251103 - New installer
@@ -56,10 +56,10 @@ BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valhe
 # scriptlet:_common/get_firewall.sh
 # scriptlet:_common/package_install.sh
 # scriptlet:_common/download.sh
+# scriptlet:_common/firewall_install.sh
 # scriptlet:bz_eval_tui/prompt_text.sh
 # scriptlet:bz_eval_tui/prompt_yn.sh
 # scriptlet:bz_eval_tui/print_header.sh
-# scriptlet:ufw/install.sh
 # scriptlet:steam/install-steamcmd.sh
 # scriptlet:warlock/install_warlock_manager.sh
 
@@ -90,57 +90,44 @@ function install_application() {
 		useradd -m -U $GAME_USER
 	fi
 
+	# Ensure the target directory exists and is owned by the game user
+	if [ ! -d "$GAME_DIR" ]; then
+		mkdir -p "$GAME_DIR"
+		chown $GAME_USER:$GAME_USER "$GAME_DIR"
+	fi
+
 	# Preliminary requirements
 	package_install curl sudo python3-venv unzip
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
-			# No firewall installed, go ahead and install UFW
-			install_ufw
+			# No firewall installed, go ahead and install the system default firewall
+			firewall_install
 		fi
 	fi
 
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
+	[ -e "$GAME_DIR/Environments" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
 
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO"
+	install_warlock_manager "$REPO" "$BRANCH"
 
-	if ! $GAME_DIR/manage.py --update; then
-		echo "Could not install $GAME_DESC, exiting" >&2
-		exit 1
-	fi
+	#if [ "$MOD_OR_VANILLA" == "modded" ]; then
+	#	if ! install_bepinex; then
+	#		echo "BepInEx installation failed, reverting to vanilla!" >&2
+	#		MOD_OR_VANILLA="vanilla"
+	#	fi
+	#fi
 
-	if [ "$MOD_OR_VANILLA" == "modded" ]; then
-		if ! install_bepinex; then
-			echo "BepInEx installation failed, reverting to vanilla!" >&2
-			MOD_OR_VANILLA="vanilla"
-		fi
-	fi
+	# Install installer (this script) for uninstallation or manual work
+	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
+	chmod +x "$GAME_DIR/installer.sh"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
 
-	# Install system service file to be loaded by systemd
-	if [ "$MOD_OR_VANILLA" == "modded" ]; then
-		cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
-# script:systemd-modded-template.service
-EOF
-	else
-    	cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
-# script:systemd-template.service
-EOF
-	fi
-
-	if [ ! -e "/etc/systemd/system/${GAME_SERVICE}.service.d/override.conf" ]; then
-		# Install system override file to be loaded by systemd
-		[ -d "/etc/systemd/system/${GAME_SERVICE}.service.d" ] || mkdir -p "/etc/systemd/system/${GAME_SERVICE}.service.d"
-		cat > /etc/systemd/system/${GAME_SERVICE}.service.d/override.conf <<EOF
-# script:systemd-override.service
-EOF
-	fi
-    systemctl daemon-reload
-
+	# Register this application install with Warlock so it can be picked up by the web manager.
 	if [ -n "$WARLOCK_GUID" ]; then
-		# Register Warlock
 		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
 		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
 	fi
@@ -164,11 +151,25 @@ function install_bepinex() {
 	return 0
 }
 
+##
+# Perform any steps necessary for upgrading an existing installation.
+#
+function upgrade_application() {
+	print_header "Existing installation detected, performing upgrade"
+
+	# Migrate existing service to new format
+	if [ -e /etc/systemd/system/valheim-server.service ] && [ ! -e "$GAME_DIR/Environments" ]; then
+		sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
+		egrep '^Environment' /etc/systemd/system/valheim-server.service | sed 's:^Environment=::' > "$GAME_DIR/Environments/valheim-server.env"
+		chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Environments/valheim-server.env"
+	fi
+}
+
 function postinstall() {
 	print_header "Performing postinstall"
 
 	# First run setup
-	$GAME_DIR/manage.py --first-run
+	$GAME_DIR/manage.py first-run
 }
 
 ##
@@ -209,17 +210,27 @@ function uninstall_application() {
 
 if [ $MODE_UNINSTALL -eq 1 ]; then
 	MODE="uninstall"
+elif [ -e "$GAME_DIR/AppFiles" ]; then
+	MODE="reinstall"
 else
 	# Default to install mode
 	MODE="install"
 fi
 
 
-if systemctl -q is-active $GAME_SERVICE; then
-	echo "$GAME_DESC service is currently running, please stop it before running this installer."
-	echo "You can do this with: sudo systemctl stop $GAME_SERVICE"
-	exit 1
+if [ -e "$GAME_DIR/Environments" ]; then
+	# Check for existing service files to determine if the service is running.
+	# This is important to prevent conflicts with the installer trying to modify files while the service is running.
+	for envfile in "$GAME_DIR/Environments/"*.env; do
+		SERVICE=$(basename "$envfile" .env)
+		if systemctl -q is-active $SERVICE; then
+			echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
+			echo "You can do this with: sudo systemctl stop $SERVICE"
+			exit 1
+		fi
+	done
 fi
+
 
 if [ -n "$OVERRIDE_DIR" ]; then
 	# User requested to change the install dir!
@@ -244,20 +255,7 @@ else
 	echo "Using default installation directory of ${GAME_DIR}"
 fi
 
-if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
-	EXISTING=1
-else
-	EXISTING=0
-fi
 
-if [ "$MOD_OR_VANILLA" == "auto" ]; then
-	# Automatic; determine if BepinEx is currently installed.
-	if [ -e "$GAME_DIR/AppFiles/BepInEx" ]; then
-		MOD_OR_VANILLA="modded"
-	else
-		MOD_OR_VANILLA="vanilla"
-	fi
-fi
 
 ############################################
 ## Installer
@@ -282,6 +280,21 @@ if [ "$MODE" == "install" ]; then
     print_header "$GAME_DESC Installation Complete"
 fi
 
+# Operations needed to be performed during a reinstallation / upgrade
+if [ "$MODE" == "reinstall" ]; then
+
+	FIREWALL=0
+
+	upgrade_application
+
+	install_application
+
+	postinstall
+
+	# Print some instructions and useful tips
+    print_header "$GAME_DESC Installation Complete"
+fi
+
 if [ "$MODE" == "uninstall" ]; then
 	if [ $NONINTERACTIVE -eq 0 ]; then
 		if prompt_yn -q --invert --default-no "This will remove all game binary content"; then
@@ -293,7 +306,7 @@ if [ "$MODE" == "uninstall" ]; then
 	fi
 
 	if prompt_yn -q --default-yes "Perform a backup before everything is wiped?"; then
-		$GAME_DIR/manage.py --backup
+		$GAME_DIR/manage.py backup
 	fi
 
 	uninstall_application

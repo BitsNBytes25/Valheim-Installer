@@ -1,25 +1,44 @@
 #!/usr/bin/env python3
-import pwd
-import random
-import string
-from scriptlets._common.firewall_allow import *
-from scriptlets._common.firewall_remove import *
-from scriptlets.bz_eval_tui.prompt_yn import *
-from scriptlets.bz_eval_tui.prompt_text import *
-from scriptlets.bz_eval_tui.table import *
-from scriptlets.bz_eval_tui.print_header import *
-from scriptlets._common.get_wan_ip import *
+import logging
+import os
+
+# To allow running as a standalone script without installing the package, include the venv path for imports.
+# This will set the include path for this path to .venv to allow packages installed therein to be utilized.
+#
+# IMPORTANT - any imports that are needed for the script to run must be after this,
+# otherwise the imports will fail when running as a standalone script.
 # import:org_python/venv_path_include.py
-from scriptlets.warlock.base_service import *
-from scriptlets.warlock.steam_app import *
-from scriptlets.warlock.ini_config import *
-from scriptlets.warlock.cli_config import *
-from scriptlets.warlock.default_run import *
+
+import yaml
+
+# Import the appropriate type of handler for the game installer.
+# Common options are:
+# from warlock_manager.apps.base_app import BaseApp
+from warlock_manager.apps.steam_app import SteamApp
+
+# Import the appropriate type of handler for the game services.
+# Common options are:
+from warlock_manager.services.base_service import BaseService
+# from warlock_manager.services.rcon_service import RCONService
+# from warlock_manager.services.socket_service import SocketService
+# from warlock_manager.services.http_service import HTTPService
+
+# Import the various configuration handlers used by this game.
+# Common options are:
+# from warlock_manager.config.cli_config import CLIConfig
+from warlock_manager.config.ini_config import INIConfig
+# from warlock_manager.config.json_config import JSONConfig
+from warlock_manager.config.properties_config import PropertiesConfig
+# from warlock_manager.config.unreal_config import UnrealConfig
+
+# Load the application runner responsible for interfacing with CLI arguments
+# and providing default functionality for running the manager.
+from warlock_manager.libs.app_runner import app_runner
+
+# If your script manages the firewall, (recommended), import the Firewall library
+from warlock_manager.libs.firewall import Firewall
 
 here = os.path.dirname(os.path.realpath(__file__))
-
-# Require sudo / root for starting/stopping the service
-IS_SUDO = os.geteuid() == 0
 
 
 class GameApp(SteamApp):
@@ -33,31 +52,32 @@ class GameApp(SteamApp):
 		self.name = 'Valheim'
 		self.desc = 'Valheim game server'
 		self.steam_id = '896660'
-		self.services = ('valheim-server',)
+		self.service_handler = GameService
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
 		}
 		self.load()
 
-	def get_save_files(self) -> Union[list, None]:
+	def first_run(self) -> bool:
 		"""
-		Get a list of save files / directories for the game server
+		Perform any first-run configuration needed for this game
 
 		:return:
 		"""
-		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json']
-		for service in self.get_services():
-			files.append(service.get_name())
-		return files
 
-	def get_save_directory(self) -> Union[str, None]:
-		"""
-		Get the save directory for the game server
+		if os.geteuid() != 0:
+			logging.error('Please run this script with sudo to perform first-run configuration.')
+			return False
 
-		:return:
-		"""
-		return os.path.join(here, 'AppFiles')
+		services = self.get_services()
+		if len(services) == 0:
+			# No services detected, create one.
+			logging.info('No services detected, creating one...')
+			self.create_service('valheim-server')
+		else:
+			logging.info('Detected %d services, skipping first-run service creation.' % len(services))
+		return True
 
 
 class GameService(BaseService):
@@ -73,11 +93,36 @@ class GameService(BaseService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'cli': CLIConfig('cli', '/etc/systemd/system/%s.service.d/override.conf' % service)
+			'service': INIConfig('service', os.path.join(self.get_app_directory(), '.%s.ini' % self.service))
 		}
-		self.configs['cli'].format = 'ExecStart=' + os.path.join(here, 'AppFiles') + '/valheim_server.x86_64 [OPTIONS]'
-		self.configs['cli'].flag_sep = ' '
 		self.load()
+
+	def get_executable(self) -> str:
+		"""
+		Get the full executable for this game service
+		:return:
+		"""
+		return os.path.join(self.get_app_directory(), 'valheim_server.x86_64')
+
+	def get_environment(self) -> dict:
+		"""
+		Get the environment variables for this service as a dictionary
+
+		:return:
+		"""
+
+		# @todo Support for BepinEx:
+		'''
+		DOORSTOP_ENABLED=1
+		DOORSTOP_TARGET_ASSEMBLY=$GAME_DIR/AppFiles/BepInEx/core/BepInEx.Preloader.dll
+		LD_PRELOAD=$GAME_DIR/AppFiles/doorstop_libs/libdoorstop_x64.so
+		LD_LIBRARY_PATH=$GAME_DIR/AppFiles/linux64:$GAME_DIR/AppFiles/doorstop_libs
+		'''
+		return {
+			'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
+			'LD_LIBRARY_PATH': self.get_app_directory(),
+			'SteamAppId': '892970'
+		}
 
 	def option_value_updated(self, option: str, previous_value, new_value):
 		"""
@@ -92,16 +137,17 @@ class GameService(BaseService):
 		if option == 'Server Port':
 			# Update firewall for game port change
 			if previous_value:
-				firewall_remove(int(previous_value), 'tcp')
-			firewall_allow(int(new_value), 'tcp', 'Allow %s game port' % self.game.desc)
+				Firewall.remove(int(previous_value), 'tcp')
+			Firewall.allow(int(new_value), 'tcp', '%s game port' % self.game.desc)
 		elif option == 'Query Port':
 			# Update firewall for game port change
 			if previous_value:
-				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
+				Firewall.remove(int(previous_value), 'udp')
+			Firewall.allow(int(new_value), 'udp', '%s query port' % self.game.desc)
 
 		# Reload systemd to apply changes
-		subprocess.run(['systemctl', 'daemon-reload'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		self.build_systemd_config()
+		self.reload()
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -109,37 +155,6 @@ class GameService(BaseService):
 		:return:
 		"""
 		return False
-
-	def get_api_port(self) -> int:
-		"""
-		Get the API port from the service configuration
-		:return:
-		"""
-		return self.get_option_value('RCON Port')
-
-	def get_api_password(self) -> str:
-		"""
-		Get the API password from the service configuration
-		:return:
-		"""
-		return self.get_option_value('RCON Password')
-
-	def get_player_count(self) -> Union[int, None]:
-		"""
-		Get the current player count on the server, or None if the API is unavailable
-		:return:
-		"""
-		try:
-			ret = self._api_cmd('/list')
-			# ret should contain 'There are N of a max...' where N is the player count.
-			if ret is None:
-				return None
-			elif 'There are ' in ret:
-				return int(ret[10:ret.index(' of a max')].strip())
-			else:
-				return None
-		except:
-			return None
 
 	def get_player_max(self) -> int:
 		"""
@@ -155,7 +170,7 @@ class GameService(BaseService):
 		"""
 		return self.get_option_value('Server Name')
 
-	def get_port(self) -> Union[int, None]:
+	def get_port(self) -> int | None:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
@@ -171,21 +186,6 @@ class GameService(BaseService):
 		# For services that do not have a helper wrapper, it's the same as the process PID
 		return self.get_pid()
 
-	def send_message(self, message: str):
-		"""
-		Send a message to all players via the game API
-		:param message:
-		:return:
-		"""
-		self._api_cmd('/say %s' % message)
-
-	def save_world(self):
-		"""
-		Force the game server to save the world via the game API
-		:return:
-		"""
-		self._api_cmd('save-all flush')
-
 	def get_port_definitions(self) -> list:
 		"""
 		Get a list of port definitions for this service
@@ -196,34 +196,6 @@ class GameService(BaseService):
 		]
 
 
-def menu_first_run(game: GameApp):
-	"""
-	Perform first-run configuration for setting up the game server initially
-
-	:param game:
-	:return:
-	"""
-	print_header('First Run Configuration')
-
-	if not IS_SUDO:
-		print('ERROR: Please run this script with sudo to perform first-run configuration.')
-		sys.exit(1)
-
-	svc = game.get_services()[0]
-
-	svc.option_ensure_set('Server Name')
-	svc.option_ensure_set('Game Port')
-	svc.option_ensure_set('Join Password')
-	svc.option_ensure_set('Public Server')
-	'''svc.option_ensure_set('RCON Port')
-	if not svc.option_has_value('RCON Password'):
-		# Generate a random password for RCON
-		random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-		svc.set_option('RCON Password', random_password)
-	if not svc.option_has_value('Enable RCON'):
-		svc.set_option('Enable RCON', True)
-	'''
-
 if __name__ == '__main__':
-	game = GameApp()
-	run_manager(game)
+	app = app_runner(GameApp())
+	app()

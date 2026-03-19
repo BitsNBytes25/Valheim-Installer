@@ -1,4 +1,4 @@
-cli:
+service:
   - name: Server Name
     key: name
     section: flag

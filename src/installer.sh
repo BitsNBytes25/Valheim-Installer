@@ -204,6 +204,7 @@ function uninstall_application() {
 	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
 	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
 	[ -d "$GAME_DIR/Configs" ] && rm -rf "$GAME_DIR/Configs"
+	[ -d "$GAME_DIR/Packages" ] && rm -rf "$GAME_DIR/Packages"
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"

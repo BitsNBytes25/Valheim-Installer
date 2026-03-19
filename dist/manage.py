@@ -104,12 +104,6 @@ class GameApp(SteamApp):
 				return field
 		return None
 
-	def get_mods(self):
-		# c11edf2c-85d9-42ff-811b-139faa4c51b3
-
-		svc = self.get_service('valheim-test4')
-		svc.add_mod('c11edf2c-85d9-42ff-811b-139faa4c51b3')
-
 
 class GameService(BaseService):
 	"""

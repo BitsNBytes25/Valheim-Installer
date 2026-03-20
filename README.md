@@ -44,3 +44,8 @@ See [LICENSE.md](LICENSE.md) for license information.
 ## Support
 
 For issues or feature requests, please open an issue on the [GitHub repository](https://github.com/BitsNBytes25/Valheim-Installer).
+
+## Links
+
+* Based on [Warlock-Template](https://github.com/BitsNBytes25/Warlock-Game-Template)
+* Uses [Warlock Game Manager](https://github.com/BitsNBytes25/Warlock-Manager)

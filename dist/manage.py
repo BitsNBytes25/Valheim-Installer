@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import logging
 import os
+import shutil
 import zipfile
 import sys
 # Include the virtual environment site-packages in sys.path
@@ -85,6 +86,10 @@ class GameApp(SteamApp):
 			logging.error('Please run this script with sudo to perform first-run configuration.')
 			return False
 
+		super().first_run()
+		self.makedirs(os.path.join(self.get_app_directory(), 'Configs'))
+		self.makedirs(os.path.join(self.get_app_directory(), 'Packages'))
+
 		# Install the game with Steam.
 		self.update()
 
@@ -96,6 +101,12 @@ class GameApp(SteamApp):
 		else:
 			logging.info('Detected %d services, skipping first-run service creation.' % len(services))
 		return True
+
+	def remove(self):
+		super().remove()
+
+		shutil.rmtree(os.path.join(self.get_app_directory(), 'Configs'))
+		shutil.rmtree(os.path.join(self.get_app_directory(), 'Packages'))
 
 	def get_mod(self, mod_id: str):
 		data = download_json(self, 'https://thunderstore.io/c/valheim/api/v1/package/')

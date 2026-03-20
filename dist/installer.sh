@@ -31,23 +31,21 @@
 #   --branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 #
 # Changelog:
-#   20251103 - New installer
+#   v20260320 - Update to the new API format
+#   v20251103 - New installer
 
 ############################################
 ## Parameter Configuration
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20260319"
+INSTALLER_VERSION="v20260320"
 GAME="Valheim"
 GAME_DESC="Valheim Dedicated Server"
 REPO="BitsNBytes25/Valheim-Installer"
 WARLOCK_GUID="33201d07-4d80-c271-28d5-82548dde0a67"
-STEAM_ID="896660"
 GAME_USER="steam"
 GAME_DIR="/home/${GAME_USER}/${GAME}"
-GAME_SERVICE="valheim-server"
-BEPINEX_URL="https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
 
 
 function usage() {
@@ -1173,9 +1171,7 @@ print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 # Expects the following variables:
 #   GAME_USER    - User account to install the game under
 #   GAME_DIR     - Directory to install the game into
-#   STEAM_ID     - Steam App ID of the game
 #   GAME_DESC    - Description of the game (for logging purposes)
-#   GAME_SERVICE - Service name to install with Systemd
 #   SAVE_DIR     - Directory to store game save files
 #
 function install_application() {
@@ -1207,8 +1203,6 @@ function install_application() {
 	fi
 
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
-	[ -e "$GAME_DIR/Environments" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
-	[ -e "$GAME_DIR/Configs" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Configs"
 
 	# Valheim stores worlds in the user's home directory, ensure that exists and is linked.
 	USER_HOME="$(getent passwd $GAME_USER | cut -d: -f6)"
@@ -1219,14 +1213,7 @@ function install_application() {
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO" "$BRANCH" "main"
-
-	#if [ "$MOD_OR_VANILLA" == "modded" ]; then
-	#	if ! install_bepinex; then
-	#		echo "BepInEx installation failed, reverting to vanilla!" >&2
-	#		MOD_OR_VANILLA="vanilla"
-	#	fi
-	#fi
+	install_warlock_manager "$REPO" "$BRANCH" "release-v2"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
@@ -1238,24 +1225,6 @@ function install_application() {
 		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
 		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
 	fi
-}
-
-function install_bepinex() {
-	print_header "Installing BepInEx for Valheim"
-
-	DEST="$(echo "$BEPINEX_URL" | sed 's:.*/\(.*\)/\([0-9\.]*\)/:\1-\2.zip:')"
-	[ -e "$GAME_DIR/Packages" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Packages"
-
-	if ! download "$BEPINEX_URL" "$GAME_DIR/Packages/$DEST" --no-overwrite; then
-		echo "Could not download BepInExPack_Valheim from Thunderstore!" >&2
-		return 1
-	fi
-
-	chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Packages"
-	sudo -u $GAME_USER unzip -o "$GAME_DIR/Packages/$DEST" "BepInExPack_Valheim/*" -d "$GAME_DIR/AppFiles/"
-	sudo -u $GAME_USER mv "$GAME_DIR/AppFiles/BepInExPack_Valheim/"* "$GAME_DIR/AppFiles/"
-	sudo -u $GAME_USER rm -rf "$GAME_DIR/AppFiles/BepInExPack_Valheim/"
-	return 0
 }
 
 ##
@@ -1285,24 +1254,12 @@ function postinstall() {
 #
 # Expects the following variables:
 #   GAME_DIR     - Directory where the game is installed
-#   GAME_SERVICE - Service name used with Systemd
 #   SAVE_DIR     - Directory where game save files are stored
 #
 function uninstall_application() {
 	print_header "Performing uninstall_application"
 
-	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE="$(basename "$envfile" .env)"
-		if [ "$SERVICE" != "*" ]; then
-			$GAME_DIR/manage.py remove-service --service "$SERVICE"
-		fi
-	done
-
-	# Game files
-	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
-	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
-	[ -d "$GAME_DIR/Configs" ] && rm -rf "$GAME_DIR/Configs"
-	[ -d "$GAME_DIR/Packages" ] && rm -rf "$GAME_DIR/Packages"
+	$GAME_DIR/manage.py remove --confirm
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"
@@ -1379,8 +1336,9 @@ fi
 if [ "$MODE" == "install" ]; then
 
 	if [ $SKIP_FIREWALL -eq 1 ]; then
+		echo "Firewall explictly disabled, skipping installation of a system firewall"
 		FIREWALL=0
-	elif [ $EXISTING -eq 0 ] && prompt_yn -q --default-yes "Install system firewall?"; then
+	elif prompt_yn -q --default-yes "Install system firewall?"; then
 		FIREWALL=1
 	else
 		FIREWALL=0

@@ -1,69 +1,46 @@
-# Using this boilerplate template
+# Valheim Installer
 
-Clone this repo and start populating with your game.
+Valheim-Installer is a tool to automate the installation and management of Valheim dedicated servers on Linux systems. 
+It supports both automated installation via [Warlock](https://github.com/BitsNBytes25/Warlock) and manual installation for advanced users.
 
-## Directory Structure
+## Features
 
-The notable directories are:
+- Automated setup of Valheim dedicated server
+- Firewall configuration
+- SteamCMD integration
+- Supports both interactive and non-interactive environments
 
-### `src/`
+## Recommended Installation (with Warlock)
 
-Contains the scripts which will get compiled.
-Refer to [Scripts Collection Builder by eVAL](https://github.com/eVAL-Agency/ScriptsCollection) for documentation
-on using the compiler and what inline flags are supported.
+The easiest and most reliable way to install Valheim-Installer is using [Warlock](https://github.com/BitsNBytes25/Warlock):
 
-In short, it just glues together a bunch of scripts into a single, distributable file.
+Refer to the [Warlock documentation](https://github.com/BitsNBytes25/Warlock) for more details.
 
-To make changes to your installer, **do so in src/!**.
+## Manual Installation
 
-### `scripts/`
-
-Not to be confused with src, this directory contains supplemental files used by scripts within src.
-These do not get compiled, but are instead referenced by the scripts in src.
-
-* configs.yaml - A YAML file containing configuration data for your game.
-* systemd-template.service - A systemd service template file for running your game as a service.
-
-### `media/`
-
-Contains media assets for your game, such as images, audio files, etc.
-It is recommended to provide at least a small logo, medium size thumbnail, and full size teaser image.
-
-### `dist/`
-
-This directory will contain the compiled output of your game installer.
-By default this will contain `installer.sh`, `manage.py`, `community_scripts.json`, and `warlock.yaml`.
-
-* The installer is the primary end point for installing the library.
-* The manager is a utility script for managing the installed game and interfacing with [Warlock](https://github.com/BitsNBytes25/Warlock).
-* community_scripts.json is a manifest file for [Tactical RMM](https://github.com/amidaware/tacticalrmm) (not generally used here)
-* warlock.yaml is a configuration file for Warlock.
-
-
-## Building your Installer
-
-Once you have populated the `src/` directory with your scripts, you can build your installer by running:
+Manual installation is supported for advanced users or custom setups.
 
 ```bash
-./compile.py
+sudo su - -c "bash <(wget -qO- https://raw.githubusercontent.com/BitsNBytes25/Valheim-Installer/dist/installer.sh)" root
 ```
 
+## Project Structure
 
-## Deploying to Warlock
+- `src/` – Source code and scripts for development
+- `dist/` – Production-ready files for installation
+- `scriptlets/` – Modular scripts for various tasks (firewall, Steam, etc.)
+- `media/` – Images and media assets
+- `scripts/` – Configuration files
 
-To deploy your game to Warlock, copy the contents of warlock.yaml
-and add it to `Apps.yaml` in Warlock.
+## Requirements
 
-For local testing, just updating your local copy is sufficient,
-but to publish your installer to the greater community please issue a merge request
-with your metadata.
+- Linux (tested on Ubuntu, Debian)
+- Python 3 (for some scriptlets)
 
+## License
 
-## Supplemental Projects and Shameless-self-plugs
+See [LICENSE.md](LICENSE.md) for license information.
 
-* [Scripts Collection Builder by eVAL](https://github.com/eVAL-Agency/ScriptsCollection)
-* [Warlock by BitsNBytes25](https://github.com/BitsNBytes25/Warlock)
-* [Bits n Bytes Community](https://bitsnbytes.dev)
-* [Donate to this project](https://ko-fi.com/bitsandbytes)
-* [Join our Discord](https://discord.gg/jyFsweECPb)
-* [Follow us on Mastodon](https://social.bitsnbytes.dev/@sitenews)
+## Support
+
+For issues or feature requests, please open an issue on the [GitHub repository](https://github.com/BitsNBytes25/Valheim-Installer).

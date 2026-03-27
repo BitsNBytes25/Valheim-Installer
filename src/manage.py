@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import logging
 import os
 import shutil
@@ -17,6 +18,7 @@ import zipfile
 from warlock_manager.apps.steam_app import SteamApp
 from warlock_manager.formatters.cli_formatter import cli_formatter
 from warlock_manager.libs.download import download_json, download_file
+from warlock_manager.libs.version import is_version_newer
 
 # Import the appropriate type of handler for the game services.
 # Common options are:
@@ -40,6 +42,81 @@ from warlock_manager.libs.app_runner import app_runner
 # If your script manages the firewall, (recommended), import the Firewall library
 from warlock_manager.libs.firewall import Firewall
 
+# Utilities provided by Warlock that are common to many applications
+from warlock_manager.libs import utils
+
+# This game supports full mod support
+from warlock_manager.mods.base_mod import BaseMod
+
+
+class GameMod(BaseMod):
+	@classmethod
+	def from_thunderstore(cls, data: dict, version: str | None) -> 'GameMod':
+		"""
+		Generate a Mod entry based on data from the Thunderstore API
+
+		:param data:
+		:param version:
+		:return:
+		"""
+		if version is None or version == '' or version == 'latest':
+			version_data = data['versions'][0] if data['versions'] and len(data['versions']) > 0 else None
+		else:
+			version_data = None
+			for v in data['versions']:
+				if v['version_number'] == version:
+					version_data = v
+					break
+
+		mod = GameMod()
+		mod.name = data['name']
+		mod.id = data['uuid4']
+		mod.author = data['owner']
+		mod.url = data['package_url']
+		if version_data is not None:
+			if version_data['website_url']:
+				mod.url = version_data['website_url']
+			mod.source = version_data['download_url']
+			mod.version = version_data['version_number']
+			mod.package = version_data['full_name'] + '.zip'
+			mod.icon = version_data['icon']
+			mod.dependencies = version_data['dependencies']
+			mod.description = version_data['description']
+
+		return mod
+
+	@classmethod
+	def find_mods(cls, mod_lookup: str) -> list['BaseMod']:
+		"""
+		Search for a mod by its name, UUID, dependency string, or full URL from Thunderstore
+
+		If a regular string is provided, it will search for a mod by its name.
+		:param mod_lookup:
+		:return:
+		"""
+		data = download_json('https://thunderstore.io/c/valheim/api/v1/package/')
+		ret = []
+		for field in data:
+			if (
+				field['uuid4'] == mod_lookup or
+				field['package_url'] == mod_lookup or
+				mod_lookup.startswith('%s-%s-' % (field['owner'], field['name']))
+			):
+				# Exact match found!
+				if mod_lookup.startswith('%s-%s-' % (field['owner'], field['name'])):
+					# Find the requested version
+					version_check = mod_lookup.replace('%s-%s-' % (field['owner'], field['name']), '')
+					mod = GameMod.from_thunderstore(field, version_check)
+				else:
+					mod = GameMod.from_thunderstore(field, None)
+				return [mod]
+
+			elif mod_lookup.lower() in field['name'].lower():
+				mod = GameMod.from_thunderstore(field, None)
+				ret.append(mod)
+
+		return ret
+
 
 class GameApp(SteamApp):
 	"""
@@ -53,12 +130,13 @@ class GameApp(SteamApp):
 		self.desc = 'Valheim game server'
 		self.steam_id = '896660'
 		self.service_handler = GameService
+		self.mod_handler = GameMod
 		self.service_prefix = 'valheim-'
 
 		self.disabled_features = {'api'}
 
 		self.configs = {
-			'manager': INIConfig('manager', os.path.join(self.get_app_directory(), '.settings.ini'))
+			'manager': INIConfig('manager', os.path.join(utils.get_app_directory(), '.settings.ini'))
 		}
 		self.load()
 
@@ -74,8 +152,8 @@ class GameApp(SteamApp):
 			return False
 
 		super().first_run()
-		self.makedirs(os.path.join(self.get_app_directory(), 'Configs'))
-		self.makedirs(os.path.join(self.get_app_directory(), 'Packages'))
+		utils.makedirs(os.path.join(utils.get_app_directory(), 'Configs'))
+		utils.makedirs(os.path.join(utils.get_app_directory(), 'Packages'))
 
 		# Install the game with Steam.
 		self.update()
@@ -92,15 +170,8 @@ class GameApp(SteamApp):
 	def remove(self):
 		super().remove()
 
-		shutil.rmtree(os.path.join(self.get_app_directory(), 'Configs'))
-		shutil.rmtree(os.path.join(self.get_app_directory(), 'Packages'))
-
-	def get_mod(self, mod_id: str):
-		data = download_json(self, 'https://thunderstore.io/c/valheim/api/v1/package/')
-		for field in data:
-			if field['uuid4'] == mod_id:
-				return field
-		return None
+		shutil.rmtree(os.path.join(utils.get_app_directory(), 'Configs'))
+		shutil.rmtree(os.path.join(utils.get_app_directory(), 'Packages'))
 
 
 class GameService(BaseService):
@@ -116,7 +187,7 @@ class GameService(BaseService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'service': INIConfig('service', os.path.join(self.game.get_app_directory(), 'Configs', 'service.%s.ini' % self.service))
+			'service': INIConfig('service', os.path.join(utils.get_app_directory(), 'Configs', 'service.%s.ini' % self.service))
 		}
 		self.load()
 
@@ -143,7 +214,7 @@ class GameService(BaseService):
 
 		if self.get_option_value('Modded Instance'):
 			return {
-				'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
+				'XDG_RUNTIME_DIR': '/run/user/%s' % utils.get_app_uid(),
 				'LD_PRELOAD': os.path.join(self.get_app_directory(), 'doorstop_libs', 'libdoorstop_x64.so'),
 				'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'doorstop_libs') + ':' + os.path.join(self.get_app_directory(), 'linux64'),
 				'SteamAppId': '892970',
@@ -152,10 +223,21 @@ class GameService(BaseService):
 			}
 		else:
 			return {
-				'XDG_RUNTIME_DIR': '/run/user/%s' % self.game.get_app_uid(),
+				'XDG_RUNTIME_DIR': '/run/user/%s' % utils.get_app_uid(),
 				'LD_LIBRARY_PATH': os.path.join(self.get_app_directory(), 'linux64'),
 				'SteamAppId': '892970'
 			}
+
+	def get_save_directory(self) -> str:
+		"""
+		Get the parent directory that contains the Save files for this game
+
+		By default this is just the app directory (AppFiles or AppFiles/{servicename}),
+		but this can be changed if the game saves files outside this directory.
+
+		:return:
+		"""
+		return os.path.join(utils.get_home_directory(), '.config/unity3d/IronGate/Valheim')
 
 	def get_save_files(self) -> list | None:
 		"""
@@ -170,7 +252,7 @@ class GameService(BaseService):
 
 		:return:
 		"""
-		return ['Worlds/%s.fwl' % self.get_option_value('World Name')]
+		return ['%s.fwl' % self.get_option_value('World Name')]
 
 	def option_value_updated(self, option: str, previous_value, new_value):
 		"""
@@ -187,12 +269,12 @@ class GameService(BaseService):
 			if previous_value:
 				Firewall.remove(int(previous_value), 'udp')
 				Firewall.remove(int(previous_value)+1, 'udp')
-			Firewall.allow(int(new_value), 'udp', '%s game port' % self.game.desc)
-			Firewall.allow(int(new_value)+1, 'udp', '%s query port' % self.game.desc)
+			Firewall.allow(int(new_value), 'udp', '%s game port' % self.game.name)
+			Firewall.allow(int(new_value)+1, 'udp', '%s query port' % self.game.name)
 		elif option == 'Modded Instance':
 			if new_value:
 				# Install BepInEx
-				self.add_mod('c11edf2c-85d9-42ff-811b-139faa4c51b3')
+				self.add_mod('https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/')
 			# Regenerate the environmental file
 			with open(self._env_file, 'w') as f:
 				env = self.get_environment()
@@ -217,48 +299,64 @@ class GameService(BaseService):
 
 		super().create_service()
 
-	def add_mod(self, mod_id: str, version: str = None):
+	def get_enabled_mods(self) -> list[GameMod]:
 		"""
-		Install a mod on the server based on the mod UUID.
+		Get all enabled mods that are locally available on this service
 
-		This installs from Thunderstore.
-
-		:param mod_id:
-		:param version:
 		:return:
 		"""
-		logging.debug('Installing mod %s' % mod_id)
+		mods = GameMod.get_registered_mods()
+		enabled_mods = []
+		for mod in mods:
+			if os.path.join(self.get_app_directory(), '.mods', mod.id):
+				with open(os.path.join(self.get_app_directory(), '.mods', mod.id), 'r') as f:
+					if f.read() == mod.version:
+						enabled_mods.append(mod)
+		return enabled_mods
 
-		mod = self.game.get_mod(mod_id)
-		if mod is None:
-			logging.error('Mod not found: %s' % mod_id)
-			return False
+	def add_mod(self, mod_lookup: str | BaseMod) -> bool:
+		"""
+		Install a mod from Thunderstore based on the mod URL or dependency string.
+
+		:param mod_lookup:
+		:return:
+		"""
+
+
+		if isinstance(mod_lookup, BaseMod):
+			# Mod object provided directly, just use it.
+			mod = mod_lookup
 		else:
-			logging.debug('Mod resolved to %s by %s' % (mod['name'], mod['owner']))
+			mods = GameMod.find_mods(mod_lookup)
+			mod = None
+			if len(mods) == 0:
+				logging.error('Mod not found: %s' % mod_lookup)
+				return False
+			elif len(mods) > 1:
+				logging.error('More than one mod found, please be more specific.')
+				return False
+			else:
+				mod = mods[0]
+				logging.debug('Mod resolved to %s by %s' % (mod.name, mod.author))
 
-		version_data = None
-		if version is not None:
-			# Find the requested version.
-			for v in mod['versions']:
-				if v['version_number'] == version:
-					version_data = v
+		logging.info('Installing mod %s' % mod.name)
+		# Check if this mod is already installed.
+		installed_mods = self.get_enabled_mods()
+		for installed_mod in installed_mods:
+			if installed_mod == mod:
+				if not is_version_newer(installed_mod.version, mod.version):
+					logging.error('Mod %s is already installed' % mod.name)
+					return True
+				else:
 					break
-		else:
-			# Latest version is generally the first entry.
-			version_data = mod['versions'][0] if mod['versions'] and len(mod['versions']) > 0 else None
 
-		if version_data is None:
-			logging.error('Mod version not found: %s' % version)
-			return False
-
-		target_archive = os.path.join(self.game.get_app_directory(), 'Packages', version_data['full_name'] + '.zip')
-		if not os.path.exists(target_archive):
-			download_file(self.game, version_data['download_url'], target_archive)
-		else:
-			logging.debug('Mod already downloaded, skipping download')
+		logging.info('Ensuring %s is downloaded' % mod.package)
+		mod.download()
 
 		# Try to extract it in a way that makes sense
-		logging.debug('Extracting mod to game directory')
+		logging.info('Extracting mod to game directory')
+		mod.files = []
+		target_archive = os.path.join(utils.get_app_directory(), 'Packages', mod.package)
 		with zipfile.ZipFile(target_archive, 'r') as zip_ref:
 			for member in zip_ref.namelist():
 				if member in ['CHANGELOG.md', 'icon.png', 'manifest.json', 'README.md']:
@@ -267,21 +365,89 @@ class GameService(BaseService):
 
 				if member.startswith('plugins/'):
 					# These can be extract directly, they're probably well formatted
-					target_path = os.path.join(self.get_app_directory(), 'BepInEx', member)
+					target_path = os.path.join('BepInEx', member)
 				elif member.startswith('BepInExPack_Valheim/'):
 					# These need to be pulled out of the directory they're in and should be in the root
-					target_path = os.path.join(self.get_app_directory(), member.replace('BepInExPack_Valheim/', ''))
+					target_path = member.replace('BepInExPack_Valheim/', '')
 				else:
 					# A number of developers just throw their DLLs in the root level of their zip
-					target_path = os.path.join(self.get_app_directory(), 'BepInEx', 'plugins', member)
+					target_path = os.path.join('BepInEx', 'plugins', member)
 
 				logging.debug('Extracting %s -> %s' % (member, target_path))
+				mod.files.append(target_path)
+				target_path_full = os.path.join(self.get_app_directory(), target_path)
 				# Ensure the target directory exists
-				self.game.ensure_file_parent_exists(target_path)
-				if not member.endswith('/'):
-					with zip_ref.open(member) as source, open(target_path, 'wb') as target:
+				utils.ensure_file_parent_exists(target_path_full)
+				if member.endswith('/'):
+					# Directory, create it
+					utils.makedirs(target_path_full)
+				else:
+					# File, extract it
+					with zip_ref.open(member) as source, open(target_path_full, 'wb') as target:
 						target.write(source.read())
-					self.game.ensure_file_ownership(target_path)
+					utils.ensure_file_ownership(target_path_full)
+
+		# Save the newly installed mod back to the registry
+		mod.register()
+
+		# Record a note of this mod and the version installed.
+		utils.makedirs(os.path.join(self.get_app_directory(), '.mods'))
+		with open(os.path.join(self.get_app_directory(), '.mods', mod.id), 'w') as f:
+			f.write(mod.version)
+		utils.ensure_file_ownership(os.path.join(self.get_app_directory(), '.mods', mod.id))
+
+		# Handle all dependencies for this mod
+		for dep in mod.dependencies:
+			logging.info('Handling dependency %s for mod %s' % (dep, mod.name))
+			if not self.add_mod(dep):
+				logging.error('Failed to install dependency %s for mod %s' % (dep, mod.name))
+
+		return True
+
+	def remove_mod(self, mod_id: str) -> bool:
+		enabled_mods = self.get_enabled_mods()
+		mod = None
+		for enabled_mod in enabled_mods:
+			if enabled_mod.id == mod_id:
+				mod = enabled_mod
+				break
+
+		if mod is None:
+			logging.error('Mod %s not found' % mod_id)
+			return False
+
+		# Uninstall the files from this mod
+		for file in mod.files:
+			target_path_full = os.path.join(self.get_app_directory(), file)
+			if os.path.isdir(target_path_full):
+				logging.info('Removing directory %s' % file)
+				shutil.rmtree(target_path_full)
+			elif os.path.isfile(target_path_full):
+				logging.info('Removing file %s' % file)
+				os.remove(target_path_full)
+			else:
+				logging.debug('Skipping non-present file %s' % file)
+
+		# Remove the registration file for this mod
+		if os.path.exists(os.path.join(self.get_app_directory(), '.mods', mod.id)):
+			logging.info('Removing registration file for mod %s' % mod.name)
+			os.remove(os.path.join(self.get_app_directory(), '.mods', mod.id))
+
+		# Also scan for any dependencies for this mod, they must be removed too.
+		# The depdendency name is just the zip name of the package, sans .zip
+		this_dep = mod.package[:-4]
+		for enabled_mod in enabled_mods:
+			if enabled_mod == mod:
+				# Skip this mod
+				continue
+			for dep in enabled_mod.dependencies:
+				if dep == this_dep:
+					logging.info('Also removing dependent mod %s' % enabled_mod.name)
+					self.remove_mod(enabled_mod.id)
+					break
+
+		return True
+
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -326,8 +492,8 @@ class GameService(BaseService):
 		:return:
 		"""
 		return [
-			('Game Port', 'udp', '%s game port' % self.game.desc),
-			(self.get_option_value('Game Port')+1, 'udp', '%s query port' % self.game.desc)
+			('Game Port', 'udp', '%s game port' % self.game.name),
+			(self.get_option_value('Game Port')+1, 'udp', '%s query port' % self.game.name)
 		]
 
 

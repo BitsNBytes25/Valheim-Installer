@@ -115,7 +115,8 @@ function install_application() {
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO" "$BRANCH" "release-v2"
+	#install_warlock_manager "$REPO" "$BRANCH" "2.1.2"
+	install_warlock_manager "$REPO" "$BRANCH" "main"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"

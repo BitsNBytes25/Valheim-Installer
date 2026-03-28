@@ -287,7 +287,9 @@ class GameService(BaseService):
 		elif option == 'Modded Instance':
 			if new_value:
 				# Install BepInEx
-				self.add_mod('https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/')
+				mods = GameMod.find_mods('https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/')
+				if len(mods) > 0:
+					self.add_mod(mods[0])
 			# Regenerate the environmental file
 			with open(self._env_file, 'w') as f:
 				env = self.get_environment()
@@ -327,36 +329,18 @@ class GameService(BaseService):
 						enabled_mods.append(mod)
 		return enabled_mods
 
-	def add_mod(self, mod_lookup: str | BaseMod) -> bool:
+	def add_mod(self, mod: 'BaseMod') -> bool:
 		"""
-		Install a mod from Thunderstore based on the mod URL or dependency string.
+		Install a mod
 
-		:param mod_lookup:
+		:param mod:
 		:return:
 		"""
-
-
-		if isinstance(mod_lookup, BaseMod):
-			# Mod object provided directly, just use it.
-			mod = mod_lookup
-		else:
-			mods = GameMod.find_mods(mod_lookup)
-			mod = None
-			if len(mods) == 0:
-				logging.error('Mod not found: %s' % mod_lookup)
-				return False
-			elif len(mods) > 1:
-				logging.error('More than one mod found, please be more specific.')
-				return False
-			else:
-				mod = mods[0]
-				logging.debug('Mod resolved to %s by %s' % (mod.name, mod.author))
-
 		logging.info('Installing mod %s' % mod.name)
 		# Check if this mod is already installed.
 		installed_mods = self.get_enabled_mods()
 		for installed_mod in installed_mods:
-			if installed_mod == mod:
+			if installed_mod.id == mod.id:
 				if not is_version_newer(installed_mod.version, mod.version):
 					logging.error('Mod %s is already installed' % mod.name)
 					return True
@@ -417,18 +401,15 @@ class GameService(BaseService):
 
 		return True
 
-	def remove_mod(self, mod_id: str) -> bool:
-		enabled_mods = self.get_enabled_mods()
-		mod = None
-		for enabled_mod in enabled_mods:
-			if enabled_mod.id == mod_id:
-				mod = enabled_mod
-				break
+	def remove_mod(self, mod: 'BaseMod') -> bool:
+		"""
+		Remove a mod
 
-		if mod is None:
-			logging.error('Mod %s not found' % mod_id)
-			return False
+		Will completely uninstall the requested mod
 
+		:param mod:
+		:return:
+		"""
 		# Uninstall the files from this mod
 		for file in mod.files:
 			target_path_full = os.path.join(self.get_app_directory(), file)
@@ -448,6 +429,7 @@ class GameService(BaseService):
 
 		# Also scan for any dependencies for this mod, they must be removed too.
 		# The depdendency name is just the zip name of the package, sans .zip
+		enabled_mods = self.get_enabled_mods()
 		this_dep = mod.package[:-4]
 		for enabled_mod in enabled_mods:
 			if enabled_mod == mod:
@@ -456,7 +438,7 @@ class GameService(BaseService):
 			for dep in enabled_mod.dependencies:
 				if dep == this_dep:
 					logging.info('Also removing dependent mod %s' % enabled_mod.name)
-					self.remove_mod(enabled_mod.id)
+					self.remove_mod(enabled_mod)
 					break
 
 		return True

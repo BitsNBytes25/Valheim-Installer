@@ -55,4 +55,3 @@ if [ "$WARLOCK_NOTICE" -eq 1 ]; then
 	echo "NOTICE - using ${WARLOCK_MANAGER} branch for local checkout which may differ from PyPI package!"
 	echo "         This development branch may contain fixes not present in the release."
 fi
-

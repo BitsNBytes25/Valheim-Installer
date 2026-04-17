@@ -122,7 +122,11 @@ class GameApp(SteamApp):
 			logging.info('No services detected, creating one...')
 			self.create_service('valheim-server')
 		else:
-			logging.info('Detected %d services, skipping first-run service creation.' % len(services))
+			# Ensure services match new format
+			for service in services:
+				logging.info('Ensuring %s service file is on latest format' % service.service)
+				service.build_systemd_config()
+				service.reload()
 		return True
 
 	def remove(self):

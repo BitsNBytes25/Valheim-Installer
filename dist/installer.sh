@@ -1293,8 +1293,25 @@ function upgrade_application() {
 	# This gets overwrote by the manager, but is needed to tell the system that the service is here.
 	if [ -e /etc/systemd/system/valheim-server.service ] && [ ! -e "$GAME_DIR/Environments" ]; then
 		sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
+		# Extract out current environment variables from the systemd file into their own dedicated file
 		egrep '^Environment' /etc/systemd/system/valheim-server.service | sed 's:^Environment=::' > "$GAME_DIR/Environments/valheim-server.env"
-		chown $GAME_USER:$GAME_USER -R "$GAME_DIR/Environments/valheim-server.env"
+		chown $GAME_USER:$GAME_USER "$GAME_DIR/Environments/valheim-server.env"
+		# Trim out those envs now that they're not longer required
+		cat /etc/systemd/system/valheim-server.service | egrep -v '^Environment=' > /etc/systemd/system/valheim-server.new
+		mv /etc/systemd/system/valheim-server.new /etc/systemd/system/valheim-server.service
+
+		if [ -e /etc/systemd/system/valheim-server.service.d ]; then
+			# If there is an override, (used in version 1.0),
+			# grab the CLI and move it to a notes document so the operator can manually review it.
+			touch "$GAME_DIR/Notes.txt"
+			echo "    !! IMPORTANT - Commands are now generated, " >> "$GAME_DIR/Notes.txt"
+			echo "    so please manually migrate the following to your game." >> "$GAME_DIR/Notes.txt"
+			echo "" >> "$GAME_DIR/Notes.txt"
+			egrep '^ExecStart=' /etc/systemd/system/valheim-server.service.d/override.conf >> "$GAME_DIR/Notes.txt"
+			chown $GAME_USER:$GAME_USER "$GAME_DIR/Notes.txt"
+			rm -fr /etc/systemd/system/valheim-server.service.d/override.conf
+			rm -fr /etc/systemd/system/valheim-server.service.d
+		fi
 	fi
 }
 
@@ -1421,6 +1438,11 @@ if [ "$MODE" == "reinstall" ]; then
 
 	# Print some instructions and useful tips
     print_header "$GAME_DESC Installation Complete"
+
+	# If there are notes generated during installation, print them now.
+    if [ -e "$GAME_DIR/Notes.txt" ]; then
+    	cat "$GAME_DIR/Notes.txt"
+	fi
 fi
 
 if [ "$MODE" == "uninstall" ]; then

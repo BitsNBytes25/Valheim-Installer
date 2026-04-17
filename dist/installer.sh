@@ -1206,9 +1206,11 @@ EOF
 
 	# Ensure warlock lib directory exists for supplemental data
 	[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
-	if [ ! -e "/var/lib/warlock/.auth" ]; then
-		head -c 64 /dev/urandom | base64 | tr -d '\n' > "/var/lib/warlock/.auth"
-	fi
+	[ -e /var/lib/warlock/.auth ] || touch /var/lib/warlock/.auth
+    # Ensure it's a valid 64-character hash
+    if [ "$(cat /var/lib/warlock/.auth | wc -c)" != "64" ]; then
+    	cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 64 | head -n 1 | tr -d '\n' > "/var/lib/warlock/.auth"
+    fi
 	[ -e "/var/lib/warlock/.email" ] || touch /var/lib/warlock/.email
 }
 

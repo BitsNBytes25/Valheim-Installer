@@ -159,8 +159,6 @@ class GameService(BaseService):
 		:param file:
 		"""
 		super().__init__(service, game)
-		self.service = service
-		self.game = game
 		self.configs = {
 			'service': INIConfig('service', os.path.join(utils.get_app_directory(), 'Configs', 'service.%s.ini' % self.service))
 		}
@@ -265,11 +263,8 @@ class GameService(BaseService):
 				else:
 					logging.error('Could not automatically install BepInEx, please install it manually.')
 					success = False
-			# Regenerate the environmental file
-			with open(self._env_file, 'w') as f:
-				env = self.get_environment()
-				for key in env:
-					f.write('%s=%s\n' % (key, env[key]))
+			# Regenerate the environmental file when modded instance is changed
+			self.build_environment_file()
 
 		# Reload systemd to apply changes
 		self.build_systemd_config()

@@ -935,7 +935,8 @@ function install_warlock_manager() {
 	"source": "github",
 	"repo": "${REPO}",
 	"branch": "${BRANCH}",
-	"commit": "${MANAGER_SHA}"
+	"commit": "${MANAGER_SHA}",
+	"game": "${WARLOCK_GUID}"
 }
 EOF
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/.manage.json"
@@ -1117,6 +1118,20 @@ service:
     help: "If true, no map will be available."
     group: Difficulty
 manager:
+  - name: Steam Branch
+    section: Steam
+    key: steam_branch
+    type: str
+    default: public
+    help: "The Steam branch to install the server from (e.g., stable, experimental)."
+    group: Settings
+  - name: Steam Branch Password
+    section: Steam
+    key: steam_branch_password
+    type: str
+    default: ""
+    help: "The password for accessing a private Steam branch, if applicable."
+    group: Settings
   - name: Shutdown Warning 5 Minutes
     section: Messages
     key: shutdown_5min
@@ -1188,10 +1203,6 @@ EOF
 	# Most games use .settings.ini for manager settings
 	touch "$GAME_DIR/.settings.ini"
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/.settings.ini"
-
-	# Save the Warlock GUID so the manager knows what game this is
-	echo -n "$WARLOCK_GUID" > "$GAME_DIR/.warlock.guid"
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/.warlock.guid"
 
 	# A python virtual environment is now required by Warlock-based managers.
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
@@ -1269,7 +1280,7 @@ function install_application() {
 
 	install_steamcmd
 
-	install_warlock_manager "$REPO" "$BRANCH" "2.2.2"
+	install_warlock_manager "$REPO" "$BRANCH" "2.2.4"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
